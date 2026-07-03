@@ -25,24 +25,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain 1.80.0
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.80.0
+          toolchain: 1.85.0
           components: clippy, rustfmt
-
-      - name: Add WASM target
-        run: rustup target add wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Build WASM (reproducible)
         run: |
           cargo clean
-          cargo build --target wasm32-unknown-unknown --release --locked
+          cargo build --target wasm32v1-none --release --locked
 
       - name: Compute SHA-256
         id: hash
         run: |
-          WASM_FILE="target/wasm32-unknown-unknown/release/audit_ledger.wasm"
+          WASM_FILE="target/wasm32v1-none/release/audit_ledger.wasm"
           SHA256=$(sha256sum "$WASM_FILE" | cut -d' ' -f1)
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           echo "WASM SHA-256: $SHA256"
@@ -60,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: audit_ledger.wasm
-          path: target/wasm32-unknown-unknown/release/audit_ledger.wasm
+          path: target/wasm32v1-none/release/audit_ledger.wasm
           retention-days: 30
 
       - name: Post SHA-256 as job summary
@@ -69,7 +67,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Git Commit**: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Rust Version**: 1.80.0" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Rust Version**: 1.85.0" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
           cat wasm-sha256.txt >> "$GITHUB_STEP_SUMMARY"
@@ -77,7 +75,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Instructions for verification**:" >> "$GITHUB_STEP_SUMMARY"
           echo "1. Clone the repository at commit $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
-          echo "2. Install Rust 1.80.0: \`rustup install 1.80.0\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "3. Build locally: \`cargo build --target wasm32-unknown-unknown --release --locked\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "4. Verify: \`sha256sum target/wasm32-unknown-unknown/release/audit_ledger.wasm\`" >> "$GITHUB_STEP_SUMMARY"
+echo "2. Install Rust 1.85.0: \`rustup install 1.85.0\`" >> "$GITHUB_STEP_SUMMARY"
+echo "3. Build locally: \`cargo build --target wasm32v1-none --release --locked\`" >> "$GITHUB_STEP_SUMMARY"
+echo "4. Verify: \`sha256sum target/wasm32v1-none/release/audit_ledger.wasm\`" >> "$GITHUB_STEP_SUMMARY"
           echo "5. Compare with hash above" >> "$GITHUB_STEP_SUMMARY"
