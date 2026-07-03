@@ -1305,7 +1305,6 @@ impl AuditLedger {
         );
         #[cfg(test)]
         {
-            return;
         }
         #[cfg(not(test))]
         {

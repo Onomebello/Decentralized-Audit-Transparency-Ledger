@@ -18,7 +18,7 @@ extern crate std;
 use audit_ledger::{AuditLedger, AuditLedgerClient};
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Ledger},
+    testutils::Address as _,
     Address, Bytes, Env, Vec,
 };
 

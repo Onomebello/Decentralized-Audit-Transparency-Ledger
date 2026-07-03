@@ -1,5 +1,5 @@
 use super::*;
-use soroban_sdk::testutils::{Address as _, Events, Ledger};
+use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{symbol_short, Bytes, BytesN, Env, Vec};
 
 fn create_ledger() -> (Env, Address, AuditLedgerClient<'static>) {
@@ -677,7 +677,7 @@ fn regression_unpause_emits_event() {
     let contract_events = env.events().all();
     let events = contract_events.events();
     // Should have pause and unpause events
-    assert!(events.len() >= 1);
+    assert!(!events.is_empty());
 }
 
 #[test]

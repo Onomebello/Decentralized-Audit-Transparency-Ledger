@@ -2615,7 +2615,7 @@ fn test_set_global_max_logs_emits_event() {
     // Verify the event was published by checking total (non-zero events list)
     let evts = env.events().all();
     // At least one event should exist after governance call
-    assert!(evts.events().len() > 0);
+    assert!(!evts.events().is_empty());
 }
 
 #[test]
@@ -2625,7 +2625,7 @@ fn test_transfer_ownership_emits_event() {
     env.mock_all_auths();
     client.transfer_ownership(&owner, &new_owner);
     let evts = env.events().all();
-    assert!(evts.events().len() > 0);
+    assert!(!evts.events().is_empty());
 }
 
 #[test]

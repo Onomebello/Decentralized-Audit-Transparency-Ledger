@@ -1,5 +1,5 @@
 use super::*;
-use soroban_sdk::testutils::{Address as _, Ledger};
+use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{symbol_short, Bytes, Env, Vec};
 
 /// Soroban test-mode budget limits used as acceptance thresholds.
