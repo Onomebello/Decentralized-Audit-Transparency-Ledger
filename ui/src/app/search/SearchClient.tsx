@@ -338,5 +338,7 @@ export default function SearchClient() {
         </div>
       )}
     </div>
+    </div>
+    </SectionErrorBoundary>
   );
 }

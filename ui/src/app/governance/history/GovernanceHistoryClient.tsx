@@ -90,6 +90,7 @@ export default function GovernanceHistoryClient() {
   }
 
   return (
+    <SectionErrorBoundary title="Governance History">
     <div>
       {/* Filter bar */}
       <div className="card mb-6 filter-bar" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -193,5 +194,6 @@ export default function GovernanceHistoryClient() {
         </button>
       </div>
     </div>
+    </SectionErrorBoundary>
   );
 }

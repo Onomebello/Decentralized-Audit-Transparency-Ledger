@@ -9,6 +9,14 @@ servers:
   - url: http://localhost:3002
     description: Legacy unversioned (redirects to /v1)
 
+tags:
+  - name: Events
+    description: Query and retrieve audit events
+  - name: Statistics
+    description: Contract statistics and metrics
+  - name: Cache
+    description: Cache management and statistics
+
 paths:
   /healthz:
     get:
@@ -217,6 +225,7 @@ paths:
       parameters:
         - name: index
           in: path
+          description: Sequential index of the event (0-based)
           required: true
           schema:
             type: integer
@@ -225,6 +234,11 @@ paths:
       responses:
         "200":
           description: Event details
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: "max-age=300, stale-while-revalidate=600"
           content:
             application/json:
               schema:
@@ -254,6 +268,7 @@ paths:
       parameters:
         - name: type
           in: path
+          description: Event type to filter by (e.g. "payment", "audit", "governance")
           required: true
           schema:
             type: string
@@ -275,7 +290,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /stats:
+  /cache/stats:
     get:
       summary: Get contract statistics
       responses:
@@ -287,7 +302,38 @@ paths:
                 type: object
                 properties:
                   data:
-                    $ref: "#/components/schemas/Statistics"
+                    $ref: "#/components/schemas/CacheStats"
+              example:
+                data:
+                  hits: 150
+                  misses: 30
+                  totalRequests: 180
+                  hitRate: "83.3%"
+                  lastReset: "2025-01-01T00:00:00.000Z"
+
+  /cache/invalidate:
+    post:
+      operationId: invalidateCache
+      summary: Invalidate cache
+      description: Resets all cache statistics and forces fresh responses on next requests.
+      tags:
+        - Cache
+      responses:
+        "200":
+          description: Cache invalidated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+              example:
+                data:
+                  message: "Cache invalidated successfully"
 
   /health:
     get:
@@ -488,6 +534,7 @@ components:
           description: Maximum events allowed (0 = unlimited)
         eventsByType:
           type: object
+          description: Count of events per event type
           additionalProperties:
             type: integer
           description: Event count grouped by type

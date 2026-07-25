@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { PageErrorBoundary } from "@/components/PageErrorBoundary";
 
 export const metadata: Metadata = {
   title: "AuditLedger Explorer",

@@ -118,6 +118,7 @@ export default function DashboardClient() {
     );
 
   return (
+    <SectionErrorBoundary title="Dashboard">
     <div>
       {/* Stats row */}
       <div className="grid-4 mb-6">
@@ -332,6 +333,7 @@ export default function DashboardClient() {
           </div>
         )}
       </div>
+    </SectionErrorBoundary>
     </div>
   );
 }

@@ -128,6 +128,7 @@ export default function ExplorerClient() {
     );
 
   return (
+    <SectionErrorBoundary title="Event Explorer">
     <div>
       {/* Filter presets */}
       <div className="filter-presets mb-4">
@@ -278,6 +279,7 @@ export default function ExplorerClient() {
         </button>
       </div>
     </div>
+    </SectionErrorBoundary>
   );
 }
 
