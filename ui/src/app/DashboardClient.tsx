@@ -12,6 +12,8 @@ import {
   YAxis,
 } from "recharts";
 import { fetchTotalEvents, fetchEventPage } from "@/lib/contract";
+import { SkeletonStats, SkeletonTable } from "@/components/Skeleton";
+import { ProgressBar } from "@/components/Spinner";
 import type { AuditEvent } from "@/types";
 
 const COLORS = [
@@ -59,7 +61,20 @@ export default function DashboardClient() {
     return () => clearInterval(id);
   }, [load]);
 
-  if (loading) return <p className="text-muted">Loading contract data…</p>;
+  if (loading)
+    return (
+      <div>
+        <ProgressBar />
+        <div style={{ marginTop: 16 }}>
+          <SkeletonStats />
+          <div className="grid-2 mb-6">
+            <div className="skeleton-card" style={{ height: 260 }} />
+            <div className="skeleton-card" style={{ height: 260 }} />
+          </div>
+          <SkeletonTable rows={5} cols={5} />
+        </div>
+      </div>
+    );
   if (error)
     return (
       <p style={{ color: "var(--error)" }}>
