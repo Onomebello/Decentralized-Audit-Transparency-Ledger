@@ -159,84 +159,69 @@ paths:
 
   /events:
     get:
-      operationId: listEvents
-      summary: List events with pagination
+      summary: List events with pagination and filtering
       description: |
-        Returns a paginated list of audit events. Supports optional filtering
-        by event type, submitter, metadata content, and time range.
-      tags:
-        - Events
+        Returns a paginated list of audit events. Supports all standard
+        filter query parameters (type, submitter, metadata, startTime,
+        endTime, sort, order).
       parameters:
-        - name: limit
-          in: query
-          description: Maximum number of events to return (1-1000)
-          required: false
-          schema:
-            type: integer
-            default: 50
-            minimum: 1
-            maximum: 1000
-          example: 50
-        - name: offset
-          in: query
-          description: Number of events to skip for pagination
-          required: false
-          schema:
-            type: integer
-            default: 0
-            minimum: 0
-          example: 0
-        - name: filter
-          in: query
-          description: |
-            JSON-encoded filter object. Supports fields: `type`, `submitter`, `metadata` (substring match), `startTime` (unix seconds), `endTime` (unix seconds).
-          required: false
-          schema:
-            type: string
-          example: '{"type":"payment","submitter":"GABC"}'
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/FilterType"
+        - $ref: "#/components/parameters/FilterSubmitter"
+        - $ref: "#/components/parameters/FilterMetadata"
+        - $ref: "#/components/parameters/FilterStartTime"
+        - $ref: "#/components/parameters/FilterEndTime"
+        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/Order"
       responses:
         "200":
           description: Paginated list of events
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-              example: "max-age=30, stale-while-revalidate=60"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/EventListResponse"
-              example:
-                data:
-                  - index: 0
-                    timestamp: 1700000000
-                    event_type: payment
-                    submitter: "GABCDEF1234567890ABCDEFGHIJKLMNO"
-                    metadata: "48656c6c6f"
-                    event_hash: "aabbccddee0011223344556677889900aabbccddee0011223344556677889900"
-                    prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-                total: 1
         "400":
-          description: Validation error
+          description: Invalid filter or pagination parameters
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error:
-                  code: VALIDATION_ERROR
-                  message: Invalid query parameters
-                  details:
-                    - field: limit
-                      message: "Expected number, received nan"
+
+  /events/search:
+    get:
+      summary: Search events by multiple filter criteria
+      description: |
+        Dedicated search endpoint that accepts all filter parameters.
+        Identical filtering to GET /events but semantically intended
+        for search workflows.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/FilterType"
+        - $ref: "#/components/parameters/FilterSubmitter"
+        - $ref: "#/components/parameters/FilterMetadata"
+        - $ref: "#/components/parameters/FilterStartTime"
+        - $ref: "#/components/parameters/FilterEndTime"
+        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/Order"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventListResponse"
+        "400":
+          description: Invalid filter or pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /events/{index}:
     get:
-      operationId: getEventByIndex
-      summary: Get event by index
-      description: Retrieve a single audit event by its sequential index on the ledger.
-      tags:
-        - Events
+      summary: Get event by sequential index
       parameters:
         - name: index
           in: path
@@ -245,7 +230,7 @@ paths:
           schema:
             type: integer
             minimum: 0
-          example: 0
+          description: Sequential index of the event
       responses:
         "200":
           description: Event details
@@ -257,16 +242,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EventDetailResponse"
-              example:
-                data:
-                  index: 0
-                  timestamp: 1700000000
-                  event_type: payment
-                  submitter: "GABCDEF1234567890ABCDEFGHIJKLMNO"
-                  metadata: "48656c6c6f"
-                  event_hash: "aabbccddee0011223344556677889900aabbccddee0011223344556677889900"
-                  prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Event"
         "400":
           description: Invalid index parameter
           content:
@@ -279,20 +258,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error:
-                  code: NOT_FOUND
-                  message: "Event with index 999 not found"
 
   /events/type/{type}:
     get:
-      operationId: getEventsByType
-      summary: Get events by type
+      summary: Get events by type with pagination
       description: |
-        Returns paginated events filtered by event type.
-        The `type` parameter is matched exactly against the event_type field.
-      tags:
-        - Events
+        Returns all events matching the given type. Supports pagination
+        via limit and offset parameters.
       parameters:
         - name: type
           in: path
@@ -300,96 +272,30 @@ paths:
           required: true
           schema:
             type: string
-            minLength: 1
-            maxLength: 32
-          example: payment
-        - name: limit
-          in: query
-          description: Maximum number of events to return
-          required: false
-          schema:
-            type: integer
-            default: 50
-            minimum: 1
-            maximum: 1000
-        - name: offset
-          in: query
-          description: Number of events to skip
-          required: false
-          schema:
-            type: integer
-            default: 0
-            minimum: 0
+            maxLength: 128
+          description: Event type to filter by
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
           description: Paginated list of events of the given type
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-              example: "max-age=30, stale-while-revalidate=60"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/EventListResponse"
-              example:
-                data:
-                  - index: 0
-                    timestamp: 1700000000
-                    event_type: payment
-                    submitter: "GABCDEF1234567890ABCDEFGHIJKLMNO"
-                    metadata: "48656c6c6f"
-                    event_hash: "aabbccddee0011223344556677889900aabbccddee0011223344556677889900"
-                    prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-                total: 1
         "400":
-          description: Validation error
+          description: Invalid type or pagination parameters
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /stats:
+  /cache/stats:
     get:
-      operationId: getStatistics
       summary: Get contract statistics
-      description: Returns aggregate statistics including total event count, global max logs cap, and per-type breakdown.
-      tags:
-        - Statistics
       responses:
         "200":
           description: Contract statistics
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-              example: "max-age=10, stale-while-revalidate=30"
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: "#/components/schemas/Statistics"
-              example:
-                data:
-                  totalEvents: 142
-                  globalMaxLogs: 100000
-                  eventsByType:
-                    payment: 80
-                    audit: 42
-                    governance: 20
-
-  /cache/stats:
-    get:
-      operationId: getCacheStats
-      summary: Get cache statistics
-      description: Returns hit/miss counts and hit rate for the response cache.
-      tags:
-        - Cache
-      responses:
-        "200":
-          description: Cache statistics
           content:
             application/json:
               schema:
@@ -429,7 +335,93 @@ paths:
                 data:
                   message: "Cache invalidated successfully"
 
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: integer
+
 components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 50
+      description: Number of events to return per page (1–1000)
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      description: Number of events to skip from the beginning
+    FilterType:
+      name: type
+      in: query
+      schema:
+        type: string
+        maxLength: 128
+      description: Filter by event type (case-insensitive partial match)
+    FilterSubmitter:
+      name: submitter
+      in: query
+      schema:
+        type: string
+        maxLength: 128
+      description: Filter by submitter address (partial match)
+    FilterMetadata:
+      name: metadata
+      in: query
+      schema:
+        type: string
+        maxLength: 256
+      description: Filter by metadata content (partial match)
+    FilterStartTime:
+      name: startTime
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+      description: Only include events at or after this unix timestamp (seconds)
+    FilterEndTime:
+      name: endTime
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+      description: Only include events at or before this unix timestamp (seconds)
+    Sort:
+      name: sort
+      in: query
+      schema:
+        type: string
+        enum: [index, timestamp, event_type, submitter]
+      description: Field to sort by
+    Order:
+      name: order
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+      description: Sort order (ascending or descending)
+
   schemas:
     HealthStatus:
       type: object
@@ -480,36 +472,29 @@ components:
 
     Event:
       type: object
-      description: An audit event recorded on the Stellar Soroban contract
+      description: An immutable audit event stored on-chain
       properties:
         index:
           type: integer
-          description: Sequential index of the event (0-based)
-          example: 0
+          description: Sequential event index
         timestamp:
           type: integer
-          description: Unix timestamp in seconds when the event was logged
-          example: 1700000000
+          description: Unix timestamp in seconds when the event was recorded
         event_type:
           type: string
-          description: Category of the event (e.g. "payment", "audit", "governance")
-          example: payment
+          description: Category of the event (e.g. "payment", "governance")
         submitter:
           type: string
-          description: Stellar public key of the event submitter (starts with G)
-          example: "GABCDEF1234567890ABCDEFGHIJKLMNO"
+          description: Stellar address of the event submitter
         metadata:
           type: string
-          description: Hex-encoded event metadata payload
-          example: "48656c6c6f"
+          description: Hex-encoded event payload
         event_hash:
           type: string
-          description: SHA-256 hash of the event content (64 hex chars)
-          example: "aabbccddee0011223344556677889900aabbccddee0011223344556677889900"
+          description: SHA-256 content hash of this event
         prev_hash:
           type: string
-          description: Hash of the previous event, forming an append-only chain
-          example: "0000000000000000000000000000000000000000000000000000000000000000"
+          description: Hash of the previous event in the chain
       required:
         - index
         - timestamp
@@ -519,35 +504,9 @@ components:
         - event_hash
         - prev_hash
 
-    Statistics:
-      type: object
-      description: Aggregate statistics for the audit ledger contract
-      properties:
-        totalEvents:
-          type: integer
-          description: Total number of events logged on-chain
-          example: 142
-        globalMaxLogs:
-          type: integer
-          description: Maximum number of events allowed (cap)
-          example: 100000
-        eventsByType:
-          type: object
-          description: Count of events per event type
-          additionalProperties:
-            type: integer
-          example:
-            payment: 80
-            audit: 42
-            governance: 20
-      required:
-        - totalEvents
-        - globalMaxLogs
-        - eventsByType
-
     EventListResponse:
       type: object
-      description: Paginated event list response
+      description: Paginated list of events with metadata
       properties:
         data:
           type: array
@@ -555,79 +514,44 @@ components:
             $ref: "#/components/schemas/Event"
         total:
           type: integer
-          description: Total number of matching events
-      required:
-        - data
-        - total
+          description: Total number of matching events across all pages
+        limit:
+          type: integer
+          description: Page size used
+        offset:
+          type: integer
+          description: Offset used
 
-    EventDetailResponse:
+    Statistics:
       type: object
-      description: Single event detail response
+      description: Aggregate contract statistics
       properties:
-        data:
-          $ref: "#/components/schemas/Event"
+        totalEvents:
+          type: integer
+          description: Total number of events logged on-chain
+        globalMaxLogs:
+          type: integer
+          description: Maximum events allowed (0 = unlimited)
+        eventsByType:
+          type: object
+          description: Count of events per event type
+          additionalProperties:
+            type: integer
+          description: Event count grouped by type
       required:
-        - data
+        - totalEvents
+        - globalMaxLogs
+        - eventsByType
 
     ErrorResponse:
       type: object
-      description: Standardized error response
+      description: Error response
       properties:
         error:
-          type: object
-          properties:
-            code:
-              type: string
-              description: Machine-readable error code
-              enum:
-                - VALIDATION_ERROR
-                - NOT_FOUND
-                - UNAUTHORIZED
-                - INTERNAL_ERROR
-              example: VALIDATION_ERROR
-            message:
-              type: string
-              description: Human-readable error message
-              example: "Invalid query parameters"
-            details:
-              type: array
-              description: Detailed field-level validation errors (only for VALIDATION_ERROR)
-              items:
-                type: object
-                properties:
-                  field:
-                    type: string
-                    description: Dot-notation path to the invalid field
-                    example: "limit"
-                  message:
-                    type: string
-                    description: Description of the validation failure
-                    example: "Expected number, received nan"
-          required:
-            - code
-            - message
-
-    CacheStats:
-      type: object
-      description: Response cache statistics
-      properties:
-        hits:
-          type: integer
-          description: Number of cache hits
-          example: 150
-        misses:
-          type: integer
-          description: Number of cache misses
-          example: 30
-        totalRequests:
-          type: integer
-          description: Total number of tracked requests
-          example: 180
-        hitRate:
           type: string
-          description: Cache hit rate as a percentage string
-          example: "83.3%"
-        lastReset:
-          type: string
-          format: date-time
-          description: ISO timestamp of the last stats reset
+          description: Human-readable error message
+        details:
+          type: array
+          items:
+            type: string
+          description: List of specific validation failures
