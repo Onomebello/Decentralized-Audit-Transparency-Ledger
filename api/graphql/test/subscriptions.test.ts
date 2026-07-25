@@ -74,7 +74,6 @@ class InMemoryWebSocket {
     });
   }
 
-  // Called by the in-memory server socket when it wants to terminate the socket.
   async closeFromServer(code?: number, reason?: string) {
     if (this.closedEmitted) {
       return;
@@ -169,6 +168,262 @@ describe("eventLogged subscription", () => {
         {
           event_type: "payment",
           metadata: "delivered",
+        },
+      ]);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it("filters by submitter", async () => {
+    const received: Array<{ event_type: string; submitter: string }> = [];
+    const client = createClient({
+      url: "ws://in-memory/graphql",
+      webSocketImpl: InMemoryWebSocket as never,
+    });
+
+    try {
+      const done = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("subscription timed out")), 2000);
+
+        client.subscribe(
+          {
+            query: `
+              subscription($submitter: String) {
+                eventLogged(submitter: $submitter) {
+                  id
+                  event_type
+                  submitter
+                }
+              }
+            `,
+            variables: { submitter: "GCCCC" },
+          },
+          {
+            next: (result) => {
+              const payload = result.data?.eventLogged;
+              if (!payload) return;
+              received.push({
+                event_type: payload.event_type,
+                submitter: payload.submitter,
+              });
+              clearTimeout(timeout);
+              resolve();
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              reject(err);
+            },
+            complete: () => undefined,
+          } satisfies Sink
+        );
+      });
+
+      await delay(25);
+
+      await publishEventLogged({
+        id: "10",
+        index: 10,
+        timestamp: Math.floor(Date.now() / 1000),
+        event_type: "audit",
+        submitter: "GAAAA",
+        metadata: "wrong submitter",
+        event_hash: "a".repeat(64),
+        prev_hash: "0".repeat(64),
+      });
+
+      await publishEventLogged({
+        id: "11",
+        index: 11,
+        timestamp: Math.floor(Date.now() / 1000),
+        event_type: "payment",
+        submitter: "GCCCC",
+        metadata: "correct submitter",
+        event_hash: "b".repeat(64),
+        prev_hash: "a".repeat(64),
+      });
+
+      await done;
+
+      expect(received).toEqual([
+        {
+          event_type: "payment",
+          submitter: "GCCCC",
+        },
+      ]);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it("filters by time range", async () => {
+    const received: Array<{ event_type: string; timestamp: number }> = [];
+    const now = Math.floor(Date.now() / 1000);
+
+    const client = createClient({
+      url: "ws://in-memory/graphql",
+      webSocketImpl: InMemoryWebSocket as never,
+    });
+
+    try {
+      const done = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("subscription timed out")), 2000);
+
+        client.subscribe(
+          {
+            query: `
+              subscription($startTime: Int, $endTime: Int) {
+                eventLogged(startTime: $startTime, endTime: $endTime) {
+                  id
+                  event_type
+                  timestamp
+                }
+              }
+            `,
+            variables: { startTime: now - 10, endTime: now + 10 },
+          },
+          {
+            next: (result) => {
+              const payload = result.data?.eventLogged;
+              if (!payload) return;
+              received.push({
+                event_type: payload.event_type,
+                timestamp: payload.timestamp,
+              });
+              clearTimeout(timeout);
+              resolve();
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              reject(err);
+            },
+            complete: () => undefined,
+          } satisfies Sink
+        );
+      });
+
+      await delay(25);
+
+      await publishEventLogged({
+        id: "20",
+        index: 20,
+        timestamp: now - 100,
+        event_type: "old_event",
+        submitter: "GAAAA",
+        metadata: "too old",
+        event_hash: "c".repeat(64),
+        prev_hash: "0".repeat(64),
+      });
+
+      await publishEventLogged({
+        id: "21",
+        index: 21,
+        timestamp: now,
+        event_type: "recent_event",
+        submitter: "GBBBB",
+        metadata: "in range",
+        event_hash: "d".repeat(64),
+        prev_hash: "c".repeat(64),
+      });
+
+      await done;
+
+      expect(received).toEqual([
+        {
+          event_type: "recent_event",
+          timestamp: now,
+        },
+      ]);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it("filters by combined type and submitter", async () => {
+    const received: Array<{ event_type: string; submitter: string }> = [];
+    const client = createClient({
+      url: "ws://in-memory/graphql",
+      webSocketImpl: InMemoryWebSocket as never,
+    });
+
+    try {
+      const done = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("subscription timed out")), 2000);
+
+        client.subscribe(
+          {
+            query: `
+              subscription($type: String, $submitter: String) {
+                eventLogged(type: $type, submitter: $submitter) {
+                  id
+                  event_type
+                  submitter
+                }
+              }
+            `,
+            variables: { type: "payment", submitter: "GDDDD" },
+          },
+          {
+            next: (result) => {
+              const payload = result.data?.eventLogged;
+              if (!payload) return;
+              received.push({
+                event_type: payload.event_type,
+                submitter: payload.submitter,
+              });
+              clearTimeout(timeout);
+              resolve();
+            },
+            error: (err) => {
+              clearTimeout(timeout);
+              reject(err);
+            },
+            complete: () => undefined,
+          } satisfies Sink
+        );
+      });
+
+      await delay(25);
+
+      await publishEventLogged({
+        id: "30",
+        index: 30,
+        timestamp: Math.floor(Date.now() / 1000),
+        event_type: "audit",
+        submitter: "GDDDD",
+        metadata: "wrong type",
+        event_hash: "e".repeat(64),
+        prev_hash: "0".repeat(64),
+      });
+
+      await publishEventLogged({
+        id: "31",
+        index: 31,
+        timestamp: Math.floor(Date.now() / 1000),
+        event_type: "payment",
+        submitter: "GEEEE",
+        metadata: "wrong submitter",
+        event_hash: "f".repeat(64),
+        prev_hash: "e".repeat(64),
+      });
+
+      await publishEventLogged({
+        id: "32",
+        index: 32,
+        timestamp: Math.floor(Date.now() / 1000),
+        event_type: "payment",
+        submitter: "GDDDD",
+        metadata: "both match",
+        event_hash: "a1".repeat(32),
+        prev_hash: "f".repeat(64),
+      });
+
+      await done;
+
+      expect(received).toEqual([
+        {
+          event_type: "payment",
+          submitter: "GDDDD",
         },
       ]);
     } finally {
