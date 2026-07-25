@@ -119,12 +119,13 @@ export default function DashboardClient() {
     );
   if (error)
     return (
-      <p style={{ color: "var(--error)" }}>
+      <p role="alert" style={{ color: "var(--error)" }}>
         Could not connect to contract: {error}
       </p>
     );
 
   return (
+    <SectionErrorBoundary title="Dashboard">
     <div>
       {/* Stats row */}
       <div className="grid-4 mb-6">
@@ -323,57 +324,43 @@ export default function DashboardClient() {
       {/* Recent events */}
       <div className="card">
         <div className="flex-between mb-4">
-          <p style={{ fontWeight: 600 }}>
-            Recent Events
-            {wsStatus === "connected" && (
-              <span
-                className="badge"
-                style={{ marginLeft: 8, fontSize: 10, background: "color-mix(in srgb, var(--success) 20%, transparent)", color: "var(--success)" }}
-              >
-                LIVE
-              </span>
-            )}
-          </p>
-          <button className="secondary" onClick={load}>
+          <p style={{ fontWeight: 600 }}>Recent Events</p>
+          <button className="secondary" onClick={load} aria-label="Refresh recent events">
             Refresh
           </button>
         </div>
         {displayRecent.length === 0 ? (
           <p className="text-muted">No events logged yet.</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Type</th>
-                <th>Submitter</th>
-                <th>Timestamp</th>
-                <th>Metadata (hex)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayRecent.map((evt) => (
-                <tr
-                  key={evt.index}
-                  style={
-                    wsEvents.some((w) => w.index === evt.index)
-                      ? { background: "color-mix(in srgb, var(--success) 8%, transparent)" }
-                      : undefined
-                  }
-                >
-                  <td>{evt.index}</td>
-                  <td>
-                    <span className="badge">{evt.event_type}</span>
-                  </td>
-                  <td className="mono">{evt.submitter.slice(0, 12)}…</td>
-                  <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
-                  <td className="mono">{evt.metadata.slice(0, 20)}…</td>
+          <div style={{ overflowX: "auto" }}>
+            <table aria-label="Recent audit events">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Submitter</th>
+                  <th scope="col">Timestamp</th>
+                  <th scope="col">Metadata (hex)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recent.map((evt) => (
+                  <tr key={evt.index}>
+                    <td>{evt.index}</td>
+                    <td>
+                      <span className="badge">{evt.event_type}</span>
+                    </td>
+                    <td className="mono">{evt.submitter.slice(0, 12)}…</td>
+                    <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
+                    <td className="mono">{evt.metadata.slice(0, 20)}…</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
+    </SectionErrorBoundary>
     </div>
   );
 }

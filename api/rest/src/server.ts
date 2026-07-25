@@ -1,5 +1,8 @@
 import express from "express";
 import cors from "cors";
+import fs from "fs";
+import path from "path";
+import yaml from "js-yaml";
 
 import { resolvers } from "../graphql/src/resolvers";
 import { exportCsv, exportJson, createStreamingExporter, ExportOptions } from "./export";
@@ -122,13 +125,23 @@ v1.get("/events", (req, res) => {
 // GET /events/:index - Get event by index
 v1.get("/events/:index", (req, res) => {
   const index = parseInt(req.params.index);
+  if (isNaN(index) || index < 0) {
+    return res.status(400).json({ error: "index must be a non-negative integer" });
+  }
+
   const result = resolvers.Query.event(null, { index }, null);
 
-  if (!result) {
-    return res.status(404).json({ error: "Event not found" });
+    if (!result) {
+      return res.status(404).json({
+        error: {
+          code: "NOT_FOUND",
+          message: `Event with index ${index} not found`,
+        },
+      });
+    }
+    res.json({ data: result });
   }
-  res.json({ data: result });
-});
+);
 
 // GET /events/type/:type - Get events by type with pagination
 v1.get("/events/type/:type", (req, res) => {

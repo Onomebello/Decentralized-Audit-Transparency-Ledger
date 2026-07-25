@@ -132,29 +132,11 @@ export default function GovernanceClient() {
     else showStatus(`Error: ${result.error}`, true);
   }
 
-  const loadActivityLog = useCallback(async () => {
-    setLogLoading(true);
-    try {
-      const res = await fetch(GRAPHQL_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: GOVERNANCE_QUERY,
-          variables: { types: null, limit: 20, offset: 0 },
-        }),
-      });
-      const json = await res.json();
-      setActivityLog(json.data?.governanceHistory ?? []);
-    } catch {
-      setActivityLog([]);
-    } finally {
-      setLogLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadActivityLog();
-  }, [loadActivityLog]);
+  const [newGlobalMax, setNewGlobalMax] = useState("");
+  const [evtType, setEvtType] = useState("");
+  const [evtMax, setEvtMax] = useState("");
+  const [removeType, setRemoveType] = useState("");
+  const [newOwner, setNewOwner] = useState("");
 
   const callerVal = walletKey
     ? Address.fromString(walletKey).toScVal()
@@ -171,12 +153,13 @@ export default function GovernanceClient() {
               {walletKey ?? "Not connected. Use Freighter browser extension."}
             </p>
           </div>
-          <button onClick={connectFreighter}>
+          <button onClick={connectFreighter} aria-label={walletKey ? "Reconnect wallet" : "Connect Freighter wallet"}>
             {walletKey ? "Reconnect" : "Connect Freighter"}
           </button>
         </div>
         {status && (
           <p
+            role={isError ? "alert" : "status"}
             style={{
               marginTop: 12,
               color: isError ? "var(--error)" : "var(--success)",
@@ -189,22 +172,26 @@ export default function GovernanceClient() {
         )}
       </div>
 
-      {/* Tab navigation */}
-      <div className="card mb-6" style={{ padding: 0, display: "flex", overflow: "hidden" }}>
-        {TABS.map((tab) => (
+      <div className="grid-2 gap-4">
+        {/* Set global max */}
+        <div className="card">
+          <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Global Max Logs</p>
+          <label htmlFor="gov-global-max" className="text-muted text-sm" style={{ display: "none" }}>New max</label>
+          <input
+            id="gov-global-max"
+            placeholder="New max (u32)"
+            value={newGlobalMax}
+            onChange={(e) => setNewGlobalMax(e.target.value)}
+            style={{ marginBottom: 12 }}
+          />
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              flex: 1,
-              background: activeTab === tab ? "var(--accent)" : "transparent",
-              color: activeTab === tab ? "#fff" : "var(--text-muted)",
-              borderRadius: 0,
-              padding: "12px 8px",
-              fontSize: 13,
-              fontWeight: activeTab === tab ? 600 : 400,
-              borderRight: "1px solid var(--border)",
-            }}
+            onClick={() =>
+              submit("set_global_max_logs", [
+                callerVal,
+                nativeToScVal(parseInt(newGlobalMax, 10), { type: "u32" }),
+              ])
+            }
+            aria-label="Set global maximum logs"
           >
             {tab}
           </button>
@@ -360,34 +347,46 @@ function ProposalsTab({
 
       <div className="grid-2">
         <div className="card">
-          <p style={{ fontWeight: 600, marginBottom: 12 }}>Approve Proposal</p>
-          <p className="text-muted text-sm mb-4">
-            Approve a pending multisig proposal by its proposal ID.
-          </p>
-          <ProposalAction
-            method="approve_proposal"
-            label="Approve"
-            callerVal={callerVal}
-            submit={submit}
-            walletKey={walletKey}
-            inputPlaceholder="Proposal ID (bytes)"
-            inputType="bytes"
+          <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Event Type Max Logs</p>
+          <label htmlFor="gov-evt-type" className="text-muted text-sm" style={{ display: "none" }}>Event type</label>
+          <input
+            id="gov-evt-type"
+            placeholder="Event type symbol"
+            value={evtType}
+            onChange={(e) => setEvtType(e.target.value)}
+            style={{ marginBottom: 8 }}
           />
+          <label htmlFor="gov-evt-max" className="text-muted text-sm" style={{ display: "none" }}>Max</label>
+          <input
+            id="gov-evt-max"
+            placeholder="Max (u32)"
+            value={evtMax}
+            onChange={(e) => setEvtMax(e.target.value)}
+            style={{ marginBottom: 12 }}
+          />
+          <button
+            onClick={() =>
+              submit("set_event_max_logs", [
+                callerVal,
+                xdr.ScVal.scvSymbol(evtType),
+                nativeToScVal(parseInt(evtMax, 10), { type: "u32" }),
+              ])
+            }
+            aria-label="Set event type maximum logs"
+          >
+            Set
+          </button>
         </div>
 
         <div className="card">
-          <p style={{ fontWeight: 600, marginBottom: 12 }}>Execute Proposal</p>
-          <p className="text-muted text-sm mb-4">
-            Execute a proposal that has received enough approvals.
-          </p>
-          <ProposalAction
-            method="execute_proposal"
-            label="Execute"
-            callerVal={callerVal}
-            submit={submit}
-            walletKey={walletKey}
-            inputPlaceholder="Proposal ID (bytes)"
-            inputType="bytes"
+          <p style={{ fontWeight: 600, marginBottom: 12 }}>Remove Event Cap</p>
+          <label htmlFor="gov-remove-type" className="text-muted text-sm" style={{ display: "none" }}>Event type</label>
+          <input
+            id="gov-remove-type"
+            placeholder="Event type symbol"
+            value={removeType}
+            onChange={(e) => setRemoveType(e.target.value)}
+            style={{ marginBottom: 12 }}
           />
         </div>
       </div>
@@ -674,8 +673,13 @@ function AccessControlTab({
         </p>
         <div className="flex gap-2">
           <button
-            onClick={() => submit("enable_allowlist_mode", [callerVal])}
-            disabled={!walletKey}
+            onClick={() =>
+              submit("remove_event_cap", [
+                callerVal,
+                xdr.ScVal.scvSymbol(removeType),
+              ])
+            }
+            aria-label="Remove event type cap"
           >
             Enable Allowlist
           </button>
@@ -692,146 +696,26 @@ function AccessControlTab({
   );
 }
 
-function ContractSettingsTab({
-  callerVal,
-  submit,
-  walletKey,
-}: {
-  callerVal: xdr.ScVal;
-  submit: (m: string, a: xdr.ScVal[]) => Promise<void>;
-  walletKey: string | null;
-}) {
-  const [globalMax, setGlobalMax] = useState("");
-  const [evtType, setEvtType] = useState("");
-  const [evtMax, setEvtMax] = useState("");
-  const [removeType, setRemoveType] = useState("");
-  const [metadataMax, setMetadataMax] = useState("");
-  const [ttl, setTtl] = useState("");
-
-  return (
-    <div className="grid-2">
-      <div className="card">
-        <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Global Max Logs</p>
-        <input
-          placeholder="New max (u32)"
-          value={globalMax}
-          onChange={(e) => setGlobalMax(e.target.value)}
-          style={{ marginBottom: 12 }}
-        />
-        <button
-          onClick={() =>
-            submit("set_global_max_logs", [
-              callerVal,
-              nativeToScVal(parseInt(globalMax, 10), { type: "u32" }),
-            ])
-          }
-          disabled={!walletKey || !globalMax}
-        >
-          Set
-        </button>
-      </div>
-
-      <div className="card">
-        <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Event Type Max Logs</p>
-        <input
-          placeholder="Event type symbol"
-          value={evtType}
-          onChange={(e) => setEvtType(e.target.value)}
-          style={{ marginBottom: 8 }}
-        />
-        <input
-          placeholder="Max (u32)"
-          value={evtMax}
-          onChange={(e) => setEvtMax(e.target.value)}
-          style={{ marginBottom: 12 }}
-        />
-        <button
-          onClick={() =>
-            submit("set_event_max_logs", [
-              callerVal,
-              xdr.ScVal.scvSymbol(evtType),
-              nativeToScVal(parseInt(evtMax, 10), { type: "u32" }),
-            ])
-          }
-          disabled={!walletKey || !evtType || !evtMax}
-        >
-          Set
-        </button>
-      </div>
-
-      <div className="card">
-        <p style={{ fontWeight: 600, marginBottom: 12 }}>Remove Event Cap</p>
-        <input
-          placeholder="Event type symbol"
-          value={removeType}
-          onChange={(e) => setRemoveType(e.target.value)}
-          style={{ marginBottom: 12 }}
-        />
-        <button
-          onClick={() =>
-            submit("remove_event_cap", [
-              callerVal,
-              xdr.ScVal.scvSymbol(removeType),
-            ])
-          }
-          disabled={!walletKey || !removeType}
-        >
-          Remove Cap
-        </button>
-      </div>
-
-      <div className="card">
-        <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Metadata Max Size</p>
-        <input
-          placeholder="Max bytes (u32)"
-          value={metadataMax}
-          onChange={(e) => setMetadataMax(e.target.value)}
-          style={{ marginBottom: 12 }}
-        />
-        <button
-          onClick={() =>
-            submit("set_metadata_max_size", [
-              callerVal,
-              nativeToScVal(parseInt(metadataMax, 10), { type: "u32" }),
-            ])
-          }
-          disabled={!walletKey || !metadataMax}
-        >
-          Set
-        </button>
-      </div>
-
-      <div className="card">
-        <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Event TTL</p>
-        <input
-          placeholder="TTL in ledgers (u32)"
-          value={ttl}
-          onChange={(e) => setTtl(e.target.value)}
-          style={{ marginBottom: 12 }}
-        />
-        <button
-          onClick={() =>
-            submit("set_event_ttl", [
-              callerVal,
-              nativeToScVal(parseInt(ttl, 10), { type: "u32" }),
-            ])
-          }
-          disabled={!walletKey || !ttl}
-        >
-          Set TTL
-        </button>
-      </div>
-
-      <div className="card">
-        <p style={{ fontWeight: 600, marginBottom: 12 }}>Pause / Unpause</p>
-        <p className="text-muted text-sm mb-4">
-          Pause or unpause all contract write operations.
-        </p>
-        <div className="flex gap-2">
+        {/* Transfer ownership */}
+        <div className="card">
+          <p style={{ fontWeight: 600, marginBottom: 12 }}>Transfer Ownership</p>
+          <label htmlFor="gov-new-owner" className="text-muted text-sm" style={{ display: "none" }}>New owner</label>
+          <input
+            id="gov-new-owner"
+            placeholder="New owner address (G…)"
+            value={newOwner}
+            onChange={(e) => setNewOwner(e.target.value)}
+            style={{ marginBottom: 12 }}
+          />
           <button
-            style={{ background: "var(--error)" }}
-            onClick={() => submit("pause", [callerVal])}
-            disabled={!walletKey}
+            style={{ background: "var(--warn)", color: "#000" }}
+            onClick={() =>
+              submit("transfer_ownership", [
+                callerVal,
+                Address.fromString(newOwner).toScVal(),
+              ])
+            }
+            aria-label="Transfer contract ownership"
           >
             Pause
           </button>
