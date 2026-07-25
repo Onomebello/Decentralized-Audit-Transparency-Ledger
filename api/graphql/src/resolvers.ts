@@ -128,8 +128,18 @@ export const resolvers = {
     eventLogged: {
       subscribe: withFilter(
         () => pubsub.asyncIterableIterator(EVENT_LOGGED),
-        (payload: { eventLogged: EventRecord } | undefined, variables: { type?: string } | undefined) =>
-          !!payload && (!variables?.type || payload.eventLogged.event_type === variables.type)
+        (
+          payload: { eventLogged: EventRecord } | undefined,
+          variables: { type?: string; submitter?: string; startTime?: number; endTime?: number } | undefined,
+        ) => {
+          if (!payload) return false;
+          const evt = payload.eventLogged;
+          if (variables?.type && evt.event_type !== variables.type) return false;
+          if (variables?.submitter && !evt.submitter.includes(variables.submitter)) return false;
+          if (variables?.startTime != null && evt.timestamp < variables.startTime) return false;
+          if (variables?.endTime != null && evt.timestamp > variables.endTime) return false;
+          return true;
+        }
       ),
     },
   },

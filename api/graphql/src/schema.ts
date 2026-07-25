@@ -54,7 +54,7 @@ export const typeDefs = `
   }
 
   type Subscription {
-    eventLogged(type: String): Event!
+    eventLogged(type: String, submitter: String, startTime: Int, endTime: Int): Event!
   }
 
   scalar JSON
