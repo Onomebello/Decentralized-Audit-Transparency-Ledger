@@ -2,12 +2,153 @@ openapi: 3.0.0
 info:
   title: Audit Ledger REST API
   description: REST adapter for Decentralized Audit & Transparency Ledger
-  version: 1.0.0
+  version: 1.1.0
 servers:
+  - url: http://localhost:3002/v1
+    description: Versioned API (v1)
   - url: http://localhost:3002
-    description: Local development server
+    description: Legacy unversioned (redirects to /v1)
 
 paths:
+  /healthz:
+    get:
+      summary: Liveness health check
+      operationId: healthz
+      tags: [health]
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /readyz:
+    get:
+      summary: Readiness health check with dependency checks
+      operationId: readyz
+      tags: [health]
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+        "503":
+          description: Service is not ready
+
+  /metrics:
+    get:
+      summary: Prometheus-compatible metrics
+      operationId: metrics
+      tags: [health]
+      responses:
+        "200":
+          description: Metrics in Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /export/events.json:
+    get:
+      summary: Export events as JSON
+      operationId: exportEventsJson
+      tags: [export]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: fields
+          in: query
+          description: Comma-separated list of fields to include
+          schema:
+            type: string
+        - name: filter
+          in: query
+          schema:
+            type: object
+      responses:
+        "200":
+          description: JSON export of events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportResponse"
+
+  /export/events.csv:
+    get:
+      summary: Export events as CSV
+      operationId: exportEventsCsv
+      tags: [export]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: fields
+          in: query
+          description: Comma-separated list of fields to include
+          schema:
+            type: string
+        - name: filter
+          in: query
+          schema:
+            type: object
+      responses:
+        "200":
+          description: CSV export of events
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /export/events/stream:
+    get:
+      summary: Streaming JSON export of events
+      operationId: exportEventsStream
+      tags: [export]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: fields
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Streaming JSON events
+          headers:
+            X-Export-Status:
+              schema:
+                type: string
+                enum: [running, completed, failed]
+
+  /export/progress:
+    get:
+      summary: Export progress status
+      operationId: exportProgress
+      tags: [export]
+      responses:
+        "200":
+          description: Current export status
+
   /events:
     get:
       summary: List events with pagination
@@ -114,6 +255,53 @@ paths:
 
 components:
   schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        uptime:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - status
+
+    ReadinessStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        service:
+          type: string
+        checks:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              latencyMs:
+                type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    ExportResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        total:
+          type: integer
+
     Event:
       type: object
       properties:

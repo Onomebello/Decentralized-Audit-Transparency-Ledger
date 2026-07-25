@@ -8,7 +8,7 @@
 import https from "https";
 import http from "http";
 import { createHash, createSign, createPrivateKey } from "crypto";
-import { createStellarRateLimiter, createEvmRateLimiter, TokenBucketRateLimiter } from "./rate-limiter";
+import { EventTransformer, StellarEvent, transformForEvm } from "./transform";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,9 +47,9 @@ const VERIFIER_ADDRESS = process.env.VERIFIER_ADDRESS ?? "";
 const RELAY_PRIVATE_KEY_HEX = process.env.RELAY_PRIVATE_KEY ?? "";
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL ?? "5000", 10);
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT ?? "8080", 10);
-const UNHEALTHY_POLL_THRESHOLD = 5;
+const UNHEALTHY_POLL_THRESHOLD = 5; // Issue #145: unhealthy if no events in 5 poll cycles
 const PROOF_CACHE_MAX_SIZE = parseInt(process.env.PROOF_CACHE_MAX_SIZE ?? "1000", 10);
-const PROOF_CACHE_TTL_MS = parseInt(process.env.PROOF_CACHE_TTL_MS ?? "3600000", 10);
+const PROOF_CACHE_TTL_MS = parseInt(process.env.PROOF_CACHE_TTL_MS ?? "3600000", 10); // 1 hour default
 
 // ── Health tracking state ─────────────────────────────────────────────────────
 
@@ -257,17 +257,13 @@ async function run(): Promise<void> {
   relayerState.lastProcessedIndex = 0;
   const relayKey = RELAY_PRIVATE_KEY_HEX ? Buffer.from(RELAY_PRIVATE_KEY_HEX, "hex") : Buffer.alloc(32);
   const proofCache = new ProofCache(PROOF_CACHE_MAX_SIZE, PROOF_CACHE_TTL_MS);
-  const stellarLimiter = createStellarRateLimiter();
-  const evmLimiter = createEvmRateLimiter();
+  const transformer = new EventTransformer({ chainId: "evm-mainnet", sourceChain: "stellar" });
 
   console.log(`[relayer] starting — Stellar RPC: ${STELLAR_RPC}`);
   console.log(`[relayer] EVM target: ${VERIFIER_ADDRESS} @ ${EVM_RPC}`);
   console.log(`[relayer] proof cache: max ${PROOF_CACHE_MAX_SIZE} entries, TTL ${PROOF_CACHE_TTL_MS}ms`);
-  console.log(`[relayer] rate limits: Stellar ${stellarLimiter.getStats().refillRate}/s, EVM ${evmLimiter.getStats().refillRate}/s`);
 
-  stellarLimiter.startAutoRefill();
-  evmLimiter.startAutoRefill();
-
+  // Start health check server (Issue #145)
   startHealthServer();
 
   while (true) {
@@ -284,6 +280,17 @@ async function run(): Promise<void> {
       for (const event of events) {
         console.log(`[relayer] processing event #${event.index} type=${event.event_type}`);
 
+        // Issue #259: Transform event for cross-chain compatibility
+        const txResult = transformer.transformEvent(event);
+        if (!txResult.success) {
+          console.error(`[relayer] transformation failed for event #${event.index}:`, txResult.errors);
+          continue;
+        }
+        if (txResult.warnings.length > 0) {
+          console.warn(`[relayer] transformation warnings for event #${event.index}:`, txResult.warnings);
+        }
+
+        // Issue #142: Check proof cache before rebuilding
         let proof = proofCache.get(event.event_hash);
         if (proof) {
           console.log(`[relayer] proof cache hit for event #${event.index}`);
@@ -293,32 +300,19 @@ async function run(): Promise<void> {
           proofCache.set(event.event_hash, proof);
         }
 
-        const eventData = Buffer.from(JSON.stringify({ index: event.index, event_type: event.event_type, submitter: event.submitter, metadata: event.metadata }));
-
-        let lastError: unknown = null;
-        for (let attempt = 0; attempt < MAX_EVM_RETRIES; attempt++) {
-          try {
-            await evmLimiter.waitForToken();
-            const result = await submitToEvm(proof, eventData);
-            console.log(`[relayer] submitted proof for event #${event.index} → EVM result: ${result}`);
-            lastError = null;
-            break;
-          } catch (err) {
-            lastError = err;
-            console.error(`[relayer] EVM submission attempt ${attempt + 1}/${MAX_EVM_RETRIES} failed:`, err);
-            if (attempt < MAX_EVM_RETRIES - 1) {
-              const backoff = Math.pow(2, attempt) * 1000;
-              console.log(`[relayer] retrying in ${backoff}ms...`);
-              await new Promise((r) => setTimeout(r, backoff));
-            }
-          }
-        }
-
-        if (lastError) {
-          console.error(`[relayer] failed to submit proof for event #${event.index} after ${MAX_EVM_RETRIES} attempts`);
-        } else {
-          relayerState.lastProcessedIndex = Math.max(relayerState.lastProcessedIndex, event.index + 1);
-        }
+        const evmEvent = txResult.data!;
+        const eventData = Buffer.from(JSON.stringify({
+          index: evmEvent.index,
+          eventType: evmEvent.eventType,
+          category: evmEvent.category,
+          submitter: evmEvent.submitter,
+          metadata: evmEvent.metadata,
+          chainId: evmEvent.chainId,
+          sourceChain: evmEvent.sourceChain,
+        }));
+        const result = await submitToEvm(proof, eventData);
+        console.log(`[relayer] submitted proof for event #${event.index} → EVM result: ${result}`);
+        relayerState.lastProcessedIndex = Math.max(relayerState.lastProcessedIndex, event.index + 1);
       }
     } catch (err) {
       console.error("[relayer] poll error:", err);
@@ -332,4 +326,4 @@ if (require.main === module) {
   run().catch((err) => { console.error(err); process.exit(1); });
 }
 
-export { buildProof, fetchLatestEvents, EventProof, AuditEvent, HealthStatus, ProofCache };
+export { buildProof, fetchLatestEvents, EventProof, AuditEvent, HealthStatus, ProofCache, EventTransformer };

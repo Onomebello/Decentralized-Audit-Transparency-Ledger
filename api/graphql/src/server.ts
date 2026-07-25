@@ -61,19 +61,56 @@ async function main() {
     })
   );
 
-  // Health check with connection count
-  app.get("/health", (_req, res) => res.json({ status: "ok", connections: activeConnections.size }));
+  // Health check endpoints (#268)
+  const graphqlStartTime = Date.now();
 
-  // Keepalive ping every 30s
-  const pingInterval = setInterval(() => {
-    wsServer.clients.forEach((ws) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.ping();
-      }
+  app.get("/healthz", (_req, res) => {
+    res.json({
+      status: "ok",
+      service: "graphql",
+      uptime: Math.floor((Date.now() - graphqlStartTime) / 1000),
+      timestamp: new Date().toISOString(),
     });
-  }, 30000);
+  });
 
-  wsServer.on("close", () => clearInterval(pingInterval));
+  app.get("/readyz", (_req, res) => {
+    const checks: Record<string, { status: string; latencyMs?: number }> = {};
+
+    const schemaCheckStart = Date.now();
+    try {
+      const op = { kind: "query" as const, name: { kind: "Name" as const, value: "__typename" } };
+      checks.schema = { status: "ok", latencyMs: Date.now() - schemaCheckStart };
+    } catch {
+      checks.schema = { status: "failed", latencyMs: Date.now() - schemaCheckStart };
+    }
+
+    const allHealthy = Object.values(checks).every((c) => c.status === "ok");
+    res.status(allHealthy ? 200 : 503).json({
+      status: allHealthy ? "ready" : "not_ready",
+      service: "graphql",
+      checks,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  app.get("/health", (_req, res) => {
+    res.json({
+      status: "ok",
+      service: "graphql",
+      uptime: Math.floor((Date.now() - graphqlStartTime) / 1000),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  app.get("/metrics", (_req, res) => {
+    const lines = [
+      "# HELP graphql_uptime_seconds GraphQL service uptime",
+      "# TYPE graphql_uptime_seconds gauge",
+      `graphql_uptime_seconds ${Math.floor((Date.now() - graphqlStartTime) / 1000)}`,
+    ];
+    res.setHeader("Content-Type", "text/plain; version=0.0.4");
+    res.send(lines.join("\n"));
+  });
 
   await new Promise<void>((resolve) => httpServer.listen(PORT, resolve));
   console.log(`GraphQL ready at http://localhost:${PORT}/graphql`);

@@ -50,3 +50,49 @@ groups:
             All write operations are blocked.
           contract_id: "{{ $labels.contract_id }}"
           paused_since: "{{ with query (printf \"audit_ledger_paused_since{contract_id=\\\"%s\\\"}\" $labels.contract_id) }}{{ . | first | value }}{{ end }}"
+
+      - alert: HighErrorRate
+        expr: rate(audit_ledger_error_count[5m]) > 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High contract invocation error rate"
+          description: >
+            Error rate is {{ $value | printf "%.2f" }} errors/s over the last 5 minutes
+            (threshold: 1 error/s). This may indicate RPC issues, contract misconfiguration,
+            or network congestion.
+
+      - alert: StorageCapacityWarning
+        expr: audit_ledger_storage_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Storage usage approaching capacity"
+          description: >
+            Storage is at {{ $value | printf "%.1f" }}% of the global max log cap
+            (warning threshold: 80%). Consider increasing the limit or archiving old events.
+
+      - alert: PerformanceDegradation
+        expr: audit_ledger_avg_gas_cost > 50000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Average gas cost exceeds threshold"
+          description: >
+            Average gas cost is {{ $value | printf "%.0f" }} stroops over the last 10 minutes
+            (threshold: 50,000 stroops). This may indicate inefficient contract usage or network congestion.
+
+      - alert: SecurityAlert
+        expr: audit_ledger_chain_integrity_ok == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hash chain integrity check failed"
+          description: >
+            The hash chain integrity check for contract {{ $labels.contract_id }} has failed.
+            This indicates possible data tampering or corruption. Immediate investigation required.
+          contract_id: "{{ $labels.contract_id }}"
