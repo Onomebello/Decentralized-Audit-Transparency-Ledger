@@ -114,56 +114,74 @@ export default function ExplorerClient() {
   }
 
   function SortIcon({ k }: { k: SortKey }) {
-    if (sortKey !== k) return <span style={{ opacity: 0.3 }}> ↕</span>;
-    return <span>{sortAsc ? " ↑" : " ↓"}</span>;
+    if (sortKey !== k) return <span aria-hidden="true" style={{ opacity: 0.3 }}> ↕</span>;
+    return <span aria-hidden="true">{sortAsc ? " ↑" : " ↓"}</span>;
   }
 
   const hasFilters = typeFilter || submitterFilter || dateFrom || dateTo;
 
   if (error)
     return (
-      <p style={{ color: "var(--error)" }}>Error loading events: {error}</p>
+      <p role="alert" style={{ color: "var(--error)" }}>Error loading events: {error}</p>
     );
 
   return (
     <div>
       {/* Filters */}
       <div className="card mb-4" style={{ padding: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <input
-            type="text"
-            placeholder="Filter by type…"
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
-          />
-          <input
-            type="text"
-            placeholder="Filter by submitter…"
-            value={submitterFilter}
-            onChange={(e) => setSubmitterFilter(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
-          />
-          <input
-            type="datetime-local"
-            title="From date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
-          />
-          <input
-            type="datetime-local"
-            title="To date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
-          />
+        <div
+          className="filter-grid"
+          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}
+        >
+          <div>
+            <label htmlFor="filter-type" className="text-muted text-sm">Event Type</label>
+            <input
+              id="filter-type"
+              type="text"
+              placeholder="e.g. payment"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            />
+          </div>
+          <div>
+            <label htmlFor="filter-submitter" className="text-muted text-sm">Submitter</label>
+            <input
+              id="filter-submitter"
+              type="text"
+              placeholder="G..."
+              value={submitterFilter}
+              onChange={(e) => setSubmitterFilter(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            />
+          </div>
+          <div>
+            <label htmlFor="filter-date-from" className="text-muted text-sm">From Date</label>
+            <input
+              id="filter-date-from"
+              type="datetime-local"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            />
+          </div>
+          <div>
+            <label htmlFor="filter-date-to" className="text-muted text-sm">To Date</label>
+            <input
+              id="filter-date-to"
+              type="datetime-local"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            />
+          </div>
         </div>
         {hasFilters && (
           <button
             className="secondary"
             style={{ marginTop: 8 }}
             onClick={() => { setTypeFilter(""); setSubmitterFilter(""); setDateFrom(""); setDateTo(""); }}
+            aria-label="Clear all active filters"
           >
             Clear filters
           </button>
@@ -175,11 +193,11 @@ export default function ExplorerClient() {
         <p className="text-muted">
           {hasFilters ? `${sorted.length} matching` : `${total} total`} events · Page {page + 1} of {Math.max(totalPages, 1)}
         </p>
-        <div className="flex gap-2">
-          <button className="secondary" onClick={() => exportAs(sorted, "csv")}>
+        <div className="flex gap-2 export-buttons">
+          <button className="secondary" onClick={() => exportAs(sorted, "csv")} aria-label="Export filtered events as CSV">
             Export CSV
           </button>
-          <button className="secondary" onClick={() => exportAs(sorted, "json")}>
+          <button className="secondary" onClick={() => exportAs(sorted, "json")} aria-label="Export filtered events as JSON">
             Export JSON
           </button>
         </div>
@@ -187,34 +205,34 @@ export default function ExplorerClient() {
 
       {/* Table */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <table>
+        <table role="grid" aria-label="Audit events">
           <thead>
             <tr>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("index")}>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("index")} scope="col" role="columnheader" aria-sort={sortKey === "index" ? (sortAsc ? "ascending" : "descending") : "none"}>
                 # <SortIcon k="index" />
               </th>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("timestamp")}>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("timestamp")} scope="col" role="columnheader" aria-sort={sortKey === "timestamp" ? (sortAsc ? "ascending" : "descending") : "none"}>
                 Timestamp <SortIcon k="timestamp" />
               </th>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("event_type")}>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("event_type")} scope="col" role="columnheader" aria-sort={sortKey === "event_type" ? (sortAsc ? "ascending" : "descending") : "none"}>
                 Type <SortIcon k="event_type" />
               </th>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("submitter")}>
+              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("submitter")} scope="col" role="columnheader" aria-sort={sortKey === "submitter" ? (sortAsc ? "ascending" : "descending") : "none"}>
                 Submitter <SortIcon k="submitter" />
               </th>
-              <th>Metadata</th>
+              <th scope="col" role="columnheader">Metadata</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }}>
+                <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }} role="status">
                   Loading…
                 </td>
               </tr>
             ) : sorted.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }}>
+                <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }} role="status">
                   No events on this page.
                 </td>
               </tr>
@@ -224,6 +242,10 @@ export default function ExplorerClient() {
                   key={evt.index}
                   style={{ cursor: "pointer" }}
                   onClick={() => setSelected(evt)}
+                  role="row"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(evt); } }}
+                  aria-label={`Event ${evt.index}: ${evt.event_type} by ${evt.submitter.slice(0, 16)}`}
                 >
                   <td>{evt.index}</td>
                   <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
@@ -245,10 +267,11 @@ export default function ExplorerClient() {
           className="secondary"
           disabled={page === 0}
           onClick={() => setPage((p) => p - 1)}
+          aria-label="Go to previous page"
         >
           ← Previous
         </button>
-        <span className="text-muted">
+        <span className="text-muted" aria-live="polite">
           {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of{" "}
           {total}
         </span>
@@ -256,6 +279,7 @@ export default function ExplorerClient() {
           className="secondary"
           disabled={page >= totalPages - 1}
           onClick={() => setPage((p) => p + 1)}
+          aria-label="Go to next page"
         >
           Next →
         </button>
@@ -264,6 +288,9 @@ export default function ExplorerClient() {
       {/* Event detail modal */}
       {selected && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Event ${selected.index} details`}
           style={{
             position: "fixed",
             inset: 0,
@@ -274,15 +301,18 @@ export default function ExplorerClient() {
             zIndex: 50,
           }}
           onClick={() => setSelected(null)}
+          onKeyDown={(e) => { if (e.key === "Escape") setSelected(null); }}
         >
           <div
-            className="card"
+            className="card modal-content"
             style={{ width: 600, maxWidth: "90vw", maxHeight: "80vh", overflowY: "auto" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex-between mb-4">
               <h2 style={{ fontSize: 18, fontWeight: 700 }}>Event #{selected.index}</h2>
-              <button className="secondary" onClick={() => setSelected(null)}>✕</button>
+              <button className="secondary" onClick={() => setSelected(null)} aria-label="Close event details">
+                ✕
+              </button>
             </div>
             <dl style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 16px" }}>
               {(
@@ -330,5 +360,30 @@ export default function ExplorerClient() {
         </div>
       )}
     </div>
+  );
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API not available
+    }
+  }
+
+  return (
+    <button
+      className="secondary"
+      onClick={(e) => { e.stopPropagation(); copy(); }}
+      style={{ marginLeft: 8, padding: "4px 8px", fontSize: 11, minHeight: "auto" }}
+      aria-label={copied ? "Copied to clipboard" : "Copy submitter address"}
+    >
+      {copied ? "✓ Copied" : "Copy"}
+    </button>
   );
 }

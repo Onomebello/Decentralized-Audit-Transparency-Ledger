@@ -1,7 +1,37 @@
 openapi: 3.0.0
 info:
   title: Audit Ledger REST API
-  description: REST adapter for Decentralized Audit & Transparency Ledger
+  description: |
+    REST adapter for the Decentralized Audit & Transparency Ledger.
+
+    ## Event Filtering
+
+    All list endpoints support query-parameter-based filtering:
+
+    | Parameter   | Type    | Description                                      |
+    |-------------|---------|--------------------------------------------------|
+    | `type`      | string  | Filter by event type (case-insensitive partial)  |
+    | `submitter` | string  | Filter by submitter address (partial match)      |
+    | `metadata`  | string  | Filter by metadata content (partial match)       |
+    | `startTime` | integer | Only include events at or after this unix second |
+    | `endTime`   | integer | Only include events at or before this unix second|
+    | `sort`      | string  | Sort field: `index`, `timestamp`, `event_type`, or `submitter` |
+    | `order`     | string  | Sort order: `asc` (default) or `desc`            |
+    | `limit`     | integer | Page size (1–1000, default 50)                   |
+    | `offset`    | integer | Pagination offset (default 0)                    |
+
+    ### Filter Validation
+
+    Invalid filter parameters return `400 Bad Request` with an `error` message
+    and a `details` array describing each validation failure.
+
+    ### Examples
+
+    ```
+    GET /events?type=payment&order=desc&limit=10
+    GET /events/search?submitter=GABC&startTime=1700000000&endTime=1700100000
+    GET /events/type/payment?sort=timestamp&order=desc
+    ```
   version: 1.0.0
 servers:
   - url: http://localhost:3002
@@ -10,47 +40,77 @@ servers:
 paths:
   /events:
     get:
-      summary: List events with pagination
+      summary: List events with pagination and filtering
+      description: |
+        Returns a paginated list of audit events. Supports all standard
+        filter query parameters (type, submitter, metadata, startTime,
+        endTime, sort, order).
       parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-            maximum: 1000
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-        - name: filter
-          in: query
-          schema:
-            type: object
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/FilterType"
+        - $ref: "#/components/parameters/FilterSubmitter"
+        - $ref: "#/components/parameters/FilterMetadata"
+        - $ref: "#/components/parameters/FilterStartTime"
+        - $ref: "#/components/parameters/FilterEndTime"
+        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/Order"
       responses:
         "200":
-          description: List of events
+          description: Paginated list of events
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Event"
-                  total:
-                    type: integer
+                $ref: "#/components/schemas/EventListResponse"
+        "400":
+          description: Invalid filter or pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /events/search:
+    get:
+      summary: Search events by multiple filter criteria
+      description: |
+        Dedicated search endpoint that accepts all filter parameters.
+        Identical filtering to GET /events but semantically intended
+        for search workflows.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - $ref: "#/components/parameters/FilterType"
+        - $ref: "#/components/parameters/FilterSubmitter"
+        - $ref: "#/components/parameters/FilterMetadata"
+        - $ref: "#/components/parameters/FilterStartTime"
+        - $ref: "#/components/parameters/FilterEndTime"
+        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/Order"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventListResponse"
+        "400":
+          description: Invalid filter or pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /events/{index}:
     get:
-      summary: Get event by index
+      summary: Get event by sequential index
       parameters:
         - name: index
           in: path
           required: true
           schema:
             type: integer
+            minimum: 0
+          description: Sequential index of the event
       responses:
         "200":
           description: Event details
@@ -61,49 +121,55 @@ paths:
                 properties:
                   data:
                     $ref: "#/components/schemas/Event"
+        "400":
+          description: Invalid index parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /events/type/{type}:
     get:
-      summary: Get events by type
+      summary: Get events by type with pagination
+      description: |
+        Returns all events matching the given type. Supports pagination
+        via limit and offset parameters.
       parameters:
         - name: type
           in: path
           required: true
           schema:
             type: string
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
+            maxLength: 128
+          description: Event type to filter by
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
       responses:
         "200":
-          description: List of events by type
+          description: Paginated list of events of the given type
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Event"
-                  total:
-                    type: integer
+                $ref: "#/components/schemas/EventListResponse"
+        "400":
+          description: Invalid type or pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /stats:
     get:
-      summary: Get statistics
+      summary: Get contract statistics
       responses:
         "200":
-          description: Statistics
+          description: Contract statistics
           content:
             application/json:
               schema:
@@ -112,25 +178,119 @@ paths:
                   data:
                     $ref: "#/components/schemas/Statistics"
 
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: integer
+
 components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 50
+      description: Number of events to return per page (1–1000)
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      description: Number of events to skip from the beginning
+    FilterType:
+      name: type
+      in: query
+      schema:
+        type: string
+        maxLength: 128
+      description: Filter by event type (case-insensitive partial match)
+    FilterSubmitter:
+      name: submitter
+      in: query
+      schema:
+        type: string
+        maxLength: 128
+      description: Filter by submitter address (partial match)
+    FilterMetadata:
+      name: metadata
+      in: query
+      schema:
+        type: string
+        maxLength: 256
+      description: Filter by metadata content (partial match)
+    FilterStartTime:
+      name: startTime
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+      description: Only include events at or after this unix timestamp (seconds)
+    FilterEndTime:
+      name: endTime
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+      description: Only include events at or before this unix timestamp (seconds)
+    Sort:
+      name: sort
+      in: query
+      schema:
+        type: string
+        enum: [index, timestamp, event_type, submitter]
+      description: Field to sort by
+    Order:
+      name: order
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+      description: Sort order (ascending or descending)
+
   schemas:
     Event:
       type: object
+      description: An immutable audit event stored on-chain
       properties:
         index:
           type: integer
+          description: Sequential event index
         timestamp:
           type: integer
+          description: Unix timestamp in seconds when the event was recorded
         event_type:
           type: string
+          description: Category of the event (e.g. "payment", "governance")
         submitter:
           type: string
+          description: Stellar address of the event submitter
         metadata:
           type: string
+          description: Hex-encoded event payload
         event_hash:
           type: string
+          description: SHA-256 content hash of this event
         prev_hash:
           type: string
+          description: Hash of the previous event in the chain
       required:
         - index
         - timestamp
@@ -140,18 +300,53 @@ components:
         - event_hash
         - prev_hash
 
+    EventListResponse:
+      type: object
+      description: Paginated list of events with metadata
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        total:
+          type: integer
+          description: Total number of matching events across all pages
+        limit:
+          type: integer
+          description: Page size used
+        offset:
+          type: integer
+          description: Offset used
+
     Statistics:
       type: object
+      description: Aggregate contract statistics
       properties:
         totalEvents:
           type: integer
+          description: Total number of events logged on-chain
         globalMaxLogs:
           type: integer
+          description: Maximum events allowed (0 = unlimited)
         eventsByType:
           type: object
           additionalProperties:
             type: integer
+          description: Event count grouped by type
       required:
         - totalEvents
         - globalMaxLogs
         - eventsByType
+
+    ErrorResponse:
+      type: object
+      description: Error response
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        details:
+          type: array
+          items:
+            type: string
+          description: List of specific validation failures

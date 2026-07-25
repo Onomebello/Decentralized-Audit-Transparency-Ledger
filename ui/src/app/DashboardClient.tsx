@@ -36,7 +36,6 @@ export default function DashboardClient() {
         const page = await fetchEventPage(0, Math.min(10, t));
         setRecent([...page].reverse());
       }
-      // Best-effort type counts
       const { fetchEventCount } = await import("@/lib/contract");
       const counts = await Promise.all(
         KNOWN_TYPES.map(async (type) => ({
@@ -59,10 +58,10 @@ export default function DashboardClient() {
     return () => clearInterval(id);
   }, [load]);
 
-  if (loading) return <p className="text-muted">Loading contract data…</p>;
+  if (loading) return <p className="text-muted" role="status">Loading contract data…</p>;
   if (error)
     return (
-      <p style={{ color: "var(--error)" }}>
+      <p role="alert" style={{ color: "var(--error)" }}>
         Could not connect to contract: {error}
       </p>
     );
@@ -146,37 +145,39 @@ export default function DashboardClient() {
       <div className="card">
         <div className="flex-between mb-4">
           <p style={{ fontWeight: 600 }}>Recent Events</p>
-          <button className="secondary" onClick={load}>
+          <button className="secondary" onClick={load} aria-label="Refresh recent events">
             Refresh
           </button>
         </div>
         {recent.length === 0 ? (
           <p className="text-muted">No events logged yet.</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Type</th>
-                <th>Submitter</th>
-                <th>Timestamp</th>
-                <th>Metadata (hex)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.map((evt) => (
-                <tr key={evt.index}>
-                  <td>{evt.index}</td>
-                  <td>
-                    <span className="badge">{evt.event_type}</span>
-                  </td>
-                  <td className="mono">{evt.submitter.slice(0, 12)}…</td>
-                  <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
-                  <td className="mono">{evt.metadata.slice(0, 20)}…</td>
+          <div style={{ overflowX: "auto" }}>
+            <table aria-label="Recent audit events">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Submitter</th>
+                  <th scope="col">Timestamp</th>
+                  <th scope="col">Metadata (hex)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recent.map((evt) => (
+                  <tr key={evt.index}>
+                    <td>{evt.index}</td>
+                    <td>
+                      <span className="badge">{evt.event_type}</span>
+                    </td>
+                    <td className="mono">{evt.submitter.slice(0, 12)}…</td>
+                    <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
+                    <td className="mono">{evt.metadata.slice(0, 20)}…</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

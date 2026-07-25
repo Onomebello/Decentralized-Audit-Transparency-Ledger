@@ -1,10 +1,19 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "AuditLedger Explorer",
-  description: "Browse and verify on-chain audit events",
+  description: "Browse and verify on-chain audit events on the Stellar network",
+  other: {
+    "theme-color": "#0f1117",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
@@ -14,7 +23,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      {/* No-flash: set data-theme before first paint */}
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -23,6 +31,9 @@ export default function RootLayout({
         />
       </head>
       <body>
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

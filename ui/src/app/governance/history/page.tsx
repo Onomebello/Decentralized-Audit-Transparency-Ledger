@@ -6,7 +6,7 @@ export default function GovernanceHistoryPage() {
   return (
     <>
       <Nav />
-      <main className="container" style={{ padding: "32px 24px" }}>
+      <main id="main-content" className="container" style={{ padding: "32px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8 }}>
           <h1 style={{ fontSize: 24, fontWeight: 700 }}>Governance History</h1>
           <Link href="/governance" style={{ fontSize: 13, color: "var(--text-muted)" }}>
