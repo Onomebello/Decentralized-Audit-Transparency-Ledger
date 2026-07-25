@@ -1,0 +1,118 @@
+# git-cliff configuration — https://git-cliff.org/docs/configuration
+#
+# Run:
+#   git cliff --config cliff.toml -o CHANGELOG.md          # full history
+#   git cliff --config cliff.toml --unreleased --prepend CHANGELOG.md  # add unreleased
+#   git cliff --config cliff.toml --latest                 # current tag only
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+specification. Changelogs for each release are generated automatically via
+[git-cliff](https://git-cliff.org/) using `cliff.toml`.
+
+---
+"""
+
+# Template for each release block (Tera syntax).
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {% if commit.breaking %}**BREAKING** {% endif %}\
+{{ commit.message | upper_first }} \
+([`{{ commit.id | truncate(length=7, end="") }}`](https://github.com/daddygokings-art/Decentralized-Audit-Transparency-Ledger/commit/{{ commit.id }}))\
+{% if commit.breaking %}\n\n  > **Migration required:** see [docs/migrations/](docs/migrations/) {% endif %}
+
+{% endfor %}\
+{% endfor %}\n
+"""
+
+# Trim leading/trailing whitespace from the rendered body.
+trim = true
+
+footer = """
+<!-- Comparison links -->
+{% for release in releases %}\
+{% if release.version %}\
+{% if release.previous.version %}\
+[{{ release.version | trim_start_matches(pat="v") }}]: \
+https://github.com/daddygokings-art/Decentralized-Audit-Transparency-Ledger/compare/{{ release.previous.version }}...{{ release.version }}
+{% else %}\
+[{{ release.version | trim_start_matches(pat="v") }}]: \
+https://github.com/daddygokings-art/Decentralized-Audit-Transparency-Ledger/releases/tag/{{ release.version }}
+{% endif %}\
+{% else %}\
+[Unreleased]: \
+https://github.com/daddygokings-art/Decentralized-Audit-Transparency-Ledger/compare/{{ release.previous.version }}...HEAD
+{% endif %}\
+{% endfor %}
+"""
+
+[git]
+# Only include commits reachable from the tags that match this pattern.
+tag_pattern = "^v[0-9]"
+
+# Skip commits whose message matches these patterns (merges, automated bumps, etc.).
+commit_preprocessors = [
+  # Strip trailing period.
+  { pattern = '\.+$', replace = "" },
+  # Linkify issue references: #123 → [#123](https://github.com/.../issues/123)
+  {
+    pattern = '\(#([0-9]+)\)',
+    replace = "([#${1}](https://github.com/daddygokings-art/Decentralized-Audit-Transparency-Ledger/issues/${1}))"
+  },
+]
+
+# Ignore commits that match these patterns entirely.
+commit_parsers = [
+  # Map Conventional Commit types to Keep a Changelog section names.
+  { message = "^feat",     group = "Added" },
+  { message = "^add",      group = "Added" },
+  { message = "^fix",      group = "Fixed" },
+  { message = "^bug",      group = "Fixed" },
+  { message = "^perf",     group = "Changed" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^change",   group = "Changed" },
+  { message = "^deprecat", group = "Deprecated" },
+  { message = "^remove",   group = "Removed" },
+  { message = "^revert",   group = "Removed" },
+  { message = "^sec",      group = "Security" },
+  { message = "^deps",     group = "Changed", default_scope = "deps" },
+  { message = "^chore\\(deps\\)", group = "Changed", default_scope = "deps" },
+  { message = "^docs",     group = "Changed", default_scope = "docs" },
+  { message = "^test",     skip = true },
+  { message = "^ci",       skip = true },
+  { message = "^chore",    skip = true },
+  { message = "^style",    skip = true },
+  { message = "^Merge",    skip = true },
+  { message = "^WIP",      skip = true },
+]
+
+# Include commits without a scope in the grouped output.
+filter_commits = false
+
+# Sort commits within each group by oldest first.
+sort_commits = "oldest"
+
+# Only include commits since the most recent tag by default.
+# Set to false to include all commits in the --unreleased output.
+filter_unconventional = false
+
+# Detect BREAKING CHANGE footer or "!" in commit message.
+protect_breaking_commits = true
+
+# Strip the "v" prefix when comparing version numbers.
+tag_pattern = "^v[0-9]"
