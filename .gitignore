@@ -49,10 +49,16 @@ ui/out/
 
 # Test artifacts & snapshots
 test_snapshots/
+__snapshots__/
 *.snap
 coverage/
 lcov.info
 tarpaulin-report.html
+.coverage
+htmlcov/
+junit*.xml
+pytest-results.xml
+.pytest_cache/
 
 # Soroban / Stellar
 .soroban/

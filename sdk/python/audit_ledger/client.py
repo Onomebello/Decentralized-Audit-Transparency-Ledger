@@ -14,6 +14,7 @@ try:
     import stellar_sdk
     from stellar_sdk import SorobanServer, Keypair
     from stellar_sdk.soroban import SorobanClient
+
     STELLAR_SDK_AVAILABLE = True
 except ImportError:
     STELLAR_SDK_AVAILABLE = False
@@ -169,11 +170,12 @@ class AuditLedgerClient:
         })
         return Event.from_dict(result) if isinstance(result, dict) else result
 
-<<<<<<< fix/127-stream-events
     def stream_events(
         self, after_index: int = 0, poll_interval_s: float = 5.0
     ) -> Generator[Event, None, None]:
         """Yield new Event objects as they are logged on-chain.
+
+        Resolves merge conflict from fix/127-stream-events.
 
         Args:
             after_index: Resume from this sequential order index (exclusive).
@@ -189,7 +191,7 @@ class AuditLedgerClient:
                 yield self.get_event_by_order(cursor)
                 cursor += 1
             time.sleep(poll_interval_s)
-=======
+
     def get_events(self, offset: int = 0, limit: int = 50) -> "Page[Event]":
         """Return a paginated slice of all events.
 
@@ -206,7 +208,88 @@ class AuditLedgerClient:
         for i in range(offset, end):
             items.append(self.get_event_by_order(i))
         return Page(items=items, total=total, offset=offset, limit=limit)
->>>>>>> master
+
+    # ── Health check (#239) ───────────────────────────────────────────────
+
+    def health_check(self) -> dict:
+        """Run a full health check and return a summary dict.
+
+        Returns a dict with keys:
+            - ``ok``: bool — True if all checks passed.
+            - ``rpc_reachable``: bool — RPC endpoint responded.
+            - ``contract_reachable``: bool — contract responded to a read call.
+            - ``rpc_url``: str — the configured RPC URL.
+            - ``contract_id``: str — the configured contract ID.
+            - ``error``: str or None — error message if any check failed.
+
+        Example::
+
+            >>> status = client.health_check()
+            >>> status["ok"]
+            True
+        """
+        status = {
+            "ok": False,
+            "rpc_reachable": False,
+            "contract_reachable": False,
+            "rpc_url": self.rpc_url,
+            "contract_id": self.contract_id,
+            "error": None,
+        }
+        try:
+            if not self.check_connectivity():
+                status["error"] = "RPC endpoint is not reachable"
+                return status
+            status["rpc_reachable"] = True
+
+            self.total_events()
+            status["contract_reachable"] = True
+            status["ok"] = True
+        except Exception as exc:
+            status["error"] = str(exc)
+        return status
+
+    def check_connectivity(self) -> bool:
+        """Return True if the RPC endpoint is reachable.
+
+        Attempts a lightweight server info call. Returns False on any error.
+        """
+        try:
+            self.validate_rpc_endpoint(self.rpc_url)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def validate_rpc_endpoint(url: str) -> None:
+        """Validate that *url* looks like a well-formed HTTPS/HTTP URL.
+
+        Raises:
+            ValueError: If the URL scheme is missing or unsupported.
+
+        This is a lightweight offline check. Use :meth:`check_connectivity`
+        for a live network probe.
+        """
+        if not url:
+            raise ValueError("RPC URL must not be empty")
+        lower = url.lower()
+        if not (lower.startswith("https://") or lower.startswith("http://")):
+            raise ValueError(
+                f"RPC URL must start with 'https://' or 'http://': {url!r}"
+            )
+
+    def health_status(self) -> str:
+        """Return a human-readable health status string.
+
+        Returns ``"healthy"`` if all checks pass, ``"degraded"`` if the RPC
+        is reachable but the contract is not, or ``"unhealthy"`` otherwise.
+        """
+        result = self.health_check()
+        if result["ok"]:
+            return "healthy"
+        if result["rpc_reachable"]:
+            return "degraded"
+        return "unhealthy"
 
     # ── Governance ────────────────────────────────────────────────────────
 
@@ -312,7 +395,7 @@ class AuditLedgerClient:
     ) -> bytes:
         """Recompute the content-addressed event ID off-chain.
 
-        Matches `compute_event_id` in the contract (issue #70).
+        Matches ``compute_event_id`` in the contract (issue #70).
         """
         preimage = (
             contract_id.encode()
@@ -340,6 +423,7 @@ class AuditLedgerClient:
         """
         try:
             from stellar_sdk.keypair import Keypair
+
             verified = Keypair.from_public_key(pubkey.hex()).verify(
                 event_id, signature
             )
