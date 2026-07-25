@@ -2860,3 +2860,9 @@ mod fee_tests;
 
 #[cfg(test)]
 mod upgrade_tests;
+
+#[cfg(test)]
+mod security_tests;
+
+#[cfg(test)]
+mod comprehensive_fuzz;

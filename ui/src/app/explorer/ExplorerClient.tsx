@@ -1,7 +1,11 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { fetchTotalEvents, fetchEventPage } from "@/lib/contract";
-import { SectionErrorBoundary } from "@/components/PageErrorBoundary";
+import { useFilterPersistence, FILTER_PRESETS } from "@/components/FilterPanel";
+import FilterChips, { type FilterChip } from "@/components/FilterChips";
+import { SkeletonTable, SkeletonStats } from "@/components/Skeleton";
+import CopyButton from "@/components/CopyButton";
 import type { AuditEvent } from "@/types";
 
 const PAGE_SIZE = 20;
@@ -44,60 +48,16 @@ function tryDecodeMetadata(hex: string): string {
   }
 }
 
-function applyFilters(
-  events: AuditEvent[],
-  typeFilter: string,
-  submitterFilter: string,
-  dateFrom: string,
-  dateTo: string
-): AuditEvent[] {
-  return events.filter((e) => {
-    if (typeFilter && !e.event_type.toLowerCase().includes(typeFilter.toLowerCase())) return false;
-    if (submitterFilter && !e.submitter.toLowerCase().includes(submitterFilter.toLowerCase())) return false;
-    if (dateFrom) {
-      const fromTs = Math.floor(new Date(dateFrom).getTime() / 1000);
-      if (e.timestamp < fromTs) return false;
-    }
-    if (dateTo) {
-      const toTs = Math.floor(new Date(dateTo).getTime() / 1000);
-      if (e.timestamp > toTs) return false;
-    }
-    return true;
-  });
-}
-
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(value);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }}
-      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: copied ? "var(--success)" : "var(--text-muted)" }}
-    >
-      {copied ? "Copied" : "Copy"}
-    </button>
-  );
-}
-
 export default function ExplorerClient() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("index");
   const [sortAsc, setSortAsc] = useState(false);
-  const [selected, setSelected] = useState<AuditEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
-  const [typeFilter, setTypeFilter] = useState("");
-  const [submitterFilter, setSubmitterFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const { filters, updateFilter, clearFilters, applyPreset, hasActiveFilters } = useFilterPersistence();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,7 +75,21 @@ export default function ExplorerClient() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = applyFilters(events, typeFilter, submitterFilter, dateFrom, dateTo);
+  // Client-side filtering
+  const filtered = events.filter((e) => {
+    if (filters.event_type && !e.event_type.toLowerCase().includes(filters.event_type.toLowerCase())) return false;
+    if (filters.submitter && !e.submitter.toLowerCase().includes(filters.submitter.toLowerCase())) return false;
+    if (filters.metadata && !e.metadata.includes(filters.metadata.toLowerCase())) return false;
+    if (filters.dateFrom) {
+      const fromTs = Math.floor(new Date(filters.dateFrom).getTime() / 1000);
+      if (e.timestamp < fromTs) return false;
+    }
+    if (filters.dateTo) {
+      const toTs = Math.floor(new Date(filters.dateTo).getTime() / 1000);
+      if (e.timestamp > toTs) return false;
+    }
+    return true;
+  });
 
   const sorted = [...filtered].sort((a, b) => {
     const av = a[sortKey];
@@ -136,7 +110,17 @@ export default function ExplorerClient() {
     return <span>{sortAsc ? " ↑" : " ↓"}</span>;
   }
 
-  const hasFilters = typeFilter || submitterFilter || dateFrom || dateTo;
+  // Build filter chips
+  const activeChips: FilterChip[] = [];
+  if (filters.event_type) activeChips.push({ key: "event_type", label: `Type: ${filters.event_type}` });
+  if (filters.submitter) activeChips.push({ key: "submitter", label: `Submitter: ${filters.submitter.slice(0, 12)}…` });
+  if (filters.metadata) activeChips.push({ key: "metadata", label: `Metadata: ${filters.metadata.slice(0, 12)}…` });
+  if (filters.dateFrom) activeChips.push({ key: "dateFrom", label: `From: ${filters.dateFrom}` });
+  if (filters.dateTo) activeChips.push({ key: "dateTo", label: `To: ${filters.dateTo}` });
+
+  function removeChip(key: string) {
+    updateFilter(key as keyof typeof filters, "");
+  }
 
   if (error)
     return (
@@ -146,53 +130,65 @@ export default function ExplorerClient() {
   return (
     <SectionErrorBoundary title="Event Explorer">
     <div>
+      {/* Filter presets */}
+      <div className="filter-presets mb-4">
+        {FILTER_PRESETS.map((preset) => (
+          <button
+            key={preset.label}
+            className={`filter-preset ${JSON.stringify(preset.filters) === JSON.stringify(filters) ? "active" : ""}`}
+            onClick={() => applyPreset(preset.filters)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="card mb-4" style={{ padding: 16 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
           <input
             type="text"
             placeholder="Filter by type…"
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            value={filters.event_type}
+            onChange={(e) => updateFilter("event_type", e.target.value)}
           />
           <input
             type="text"
             placeholder="Filter by submitter…"
-            value={submitterFilter}
-            onChange={(e) => setSubmitterFilter(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            value={filters.submitter}
+            onChange={(e) => updateFilter("submitter", e.target.value)}
           />
           <input
             type="datetime-local"
             title="From date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            value={filters.dateFrom}
+            onChange={(e) => updateFilter("dateFrom", e.target.value)}
           />
           <input
             type="datetime-local"
             title="To date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)" }}
+            value={filters.dateTo}
+            onChange={(e) => updateFilter("dateTo", e.target.value)}
           />
         </div>
-        {hasFilters && (
+        {hasActiveFilters && (
           <button
             className="secondary"
             style={{ marginTop: 8 }}
-            onClick={() => { setTypeFilter(""); setSubmitterFilter(""); setDateFrom(""); setDateTo(""); }}
+            onClick={clearFilters}
           >
             Clear filters
           </button>
         )}
       </div>
 
+      {/* Active filter chips */}
+      <FilterChips chips={activeChips} onRemove={removeChip} onClearAll={clearFilters} />
+
       {/* Toolbar */}
       <div className="flex-between mb-4">
         <p className="text-muted">
-          {hasFilters ? `${sorted.length} matching` : `${total} total`} events · Page {page + 1} of {Math.max(totalPages, 1)}
+          {hasActiveFilters ? `${sorted.length} matching` : `${total} total`} events · Page {page + 1} of {Math.max(totalPages, 1)}
         </p>
         <div className="flex gap-2">
           <button className="secondary" onClick={() => exportAs(sorted, "csv")}>
@@ -206,56 +202,57 @@ export default function ExplorerClient() {
 
       {/* Table */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <table>
-          <thead>
-            <tr>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("index")}>
-                # <SortIcon k="index" />
-              </th>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("timestamp")}>
-                Timestamp <SortIcon k="timestamp" />
-              </th>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("event_type")}>
-                Type <SortIcon k="event_type" />
-              </th>
-              <th style={{ cursor: "pointer" }} onClick={() => toggleSort("submitter")}>
-                Submitter <SortIcon k="submitter" />
-              </th>
-              <th>Metadata</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+        {loading ? (
+          <SkeletonTable rows={8} cols={5} />
+        ) : (
+          <table>
+            <thead>
               <tr>
-                <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }}>
-                  Loading…
-                </td>
+                <th style={{ cursor: "pointer" }} onClick={() => toggleSort("index")}>
+                  # <SortIcon k="index" />
+                </th>
+                <th style={{ cursor: "pointer" }} onClick={() => toggleSort("timestamp")}>
+                  Timestamp <SortIcon k="timestamp" />
+                </th>
+                <th style={{ cursor: "pointer" }} onClick={() => toggleSort("event_type")}>
+                  Type <SortIcon k="event_type" />
+                </th>
+                <th style={{ cursor: "pointer" }} onClick={() => toggleSort("submitter")}>
+                  Submitter <SortIcon k="submitter" />
+                </th>
+                <th>Metadata</th>
               </tr>
-            ) : sorted.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }}>
-                  No events on this page.
-                </td>
-              </tr>
-            ) : (
-              sorted.map((evt) => (
-                <tr
-                  key={evt.index}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => setSelected(evt)}
-                >
-                  <td>{evt.index}</td>
-                  <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
-                  <td>
-                    <span className="badge">{evt.event_type}</span>
+            </thead>
+            <tbody>
+              {sorted.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }}>
+                    No events on this page.
                   </td>
-                  <td className="mono">{evt.submitter.slice(0, 16)}…</td>
-                  <td className="mono">{tryDecodeMetadata(evt.metadata).slice(0, 30)}</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                sorted.map((evt) => (
+                  <tr key={evt.index}>
+                    <td>
+                      <Link href={`/explorer/${evt.event_hash}`} style={{ color: "var(--accent)" }}>
+                        {evt.index}
+                      </Link>
+                    </td>
+                    <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
+                    <td>
+                      <span className="badge">{evt.event_type}</span>
+                    </td>
+                    <td className="mono" style={{ display: "flex", alignItems: "center" }}>
+                      {evt.submitter.slice(0, 16)}…
+                      <CopyButton value={evt.submitter} />
+                    </td>
+                    <td className="mono">{tryDecodeMetadata(evt.metadata).slice(0, 30)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Pagination */}
@@ -279,75 +276,6 @@ export default function ExplorerClient() {
           Next →
         </button>
       </div>
-
-      {/* Event detail modal */}
-      {selected && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
-          }}
-          onClick={() => setSelected(null)}
-        >
-          <div
-            className="card"
-            style={{ width: 600, maxWidth: "90vw", maxHeight: "80vh", overflowY: "auto" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex-between mb-4">
-              <h2 style={{ fontSize: 18, fontWeight: 700 }}>Event #{selected.index}</h2>
-              <button className="secondary" onClick={() => setSelected(null)}>✕</button>
-            </div>
-            <dl style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 16px" }}>
-              {(
-                [
-                  ["Index", String(selected.index)],
-                  ["Type", selected.event_type],
-                  ["Timestamp", new Date(selected.timestamp * 1000).toISOString()],
-                  ["Metadata (hex)", selected.metadata],
-                  ["Metadata (UTF-8)", tryDecodeMetadata(selected.metadata)],
-                  ["Event Hash", selected.event_hash],
-                  ["Prev Hash", selected.prev_hash],
-                ] as [string, string][]
-              ).map(([label, value]) => (
-                <>
-                  <dt key={`dt-${label}`} className="text-muted text-sm" style={{ alignSelf: "start" }}>
-                    {label}
-                  </dt>
-                  <dd key={`dd-${label}`} className="mono" style={{ wordBreak: "break-all" }}>
-                    {value}
-                  </dd>
-                </>
-              ))}
-              <dt className="text-muted text-sm" style={{ alignSelf: "center" }}>Submitter</dt>
-              <dd className="mono" style={{ wordBreak: "break-all", display: "flex", alignItems: "center" }}>
-                {selected.submitter}
-                <CopyButton value={selected.submitter} />
-              </dd>
-              {selected.tx_hash && (
-                <>
-                  <dt className="text-muted text-sm" style={{ alignSelf: "center" }}>Stellar Tx</dt>
-                  <dd>
-                    <a
-                      href={`https://stellar.expert/explorer/testnet/tx/${selected.tx_hash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ wordBreak: "break-all" }}
-                    >
-                      {selected.tx_hash}
-                    </a>
-                  </dd>
-                </>
-              )}
-            </dl>
-          </div>
-        </div>
-      )}
     </div>
     </SectionErrorBoundary>
   );

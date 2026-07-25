@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { SectionErrorBoundary } from "@/components/PageErrorBoundary";
+import { SkeletonTable } from "@/components/Skeleton";
+import { ProgressBar } from "@/components/Spinner";
 
 const GRAPHQL_URL =
   process.env.NEXT_PUBLIC_GRAPHQL_URL ?? "http://localhost:4000/graphql";
@@ -119,7 +120,12 @@ export default function GovernanceHistoryClient() {
 
       {/* Table */}
       {loading ? (
-        <p className="text-muted">Loading…</p>
+        <div>
+          <ProgressBar />
+          <div style={{ marginTop: 12 }}>
+            <SkeletonTable rows={6} cols={5} />
+          </div>
+        </div>
       ) : error ? (
         <p style={{ color: "var(--error)" }}>{error}</p>
       ) : events.length === 0 ? (
