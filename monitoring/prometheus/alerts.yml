@@ -38,15 +38,53 @@ groups:
           description: "global_max_logs is 0, blocking all new event logging."
 
       - alert: AuditLedgerPaused
-        expr: audit_ledger_paused == 1
+        expr: audit_ledger_governance_paused == 1
         for: 30m
         labels:
           severity: critical
         annotations:
           summary: "AuditLedger contract has been paused for > 30 minutes"
-          description: >
-            Contract {{ $labels.contract_id }} has been paused since
-            {{ with query (printf "audit_ledger_paused_since{contract_id=\"%s\"}" $labels.contract_id) }}{{ . | first | value | humanizeTimestamp }}{{ end }}.
-            All write operations are blocked.
-          contract_id: "{{ $labels.contract_id }}"
-          paused_since: "{{ with query (printf \"audit_ledger_paused_since{contract_id=\\\"%s\\\"}\" $labels.contract_id) }}{{ . | first | value }}{{ end }}"
+          description: "Contract has been paused. All write operations are blocked."
+
+      - alert: HighScrapeErrorRate
+        expr: rate(audit_ledger_error_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate in metrics exporter"
+          description: "Exporter error rate is {{ $value | printf \"%.2f\" }} errors/s."
+
+      - alert: ScrapeFailing
+        expr: audit_ledger_scrape_error == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Metrics exporter scrape failing"
+          description: "Exporter has been failing consecutively for contract {{ $labels.contract_id }}."
+
+      - alert: HighQueryLatency
+        expr: histogram_quantile(0.95, rate(audit_ledger_query_duration_ms_bucket[5m])) > 3000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High query latency on contract {{ $labels.contract_id }}"
+          description: "P95 query latency is {{ $value | printf \"%.0f\" }}ms."
+
+      - alert: OwnershipChanged
+        expr: changes(audit_ledger_governance_owners[5m]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "Contract ownership changed"
+          description: "Number of contract owners changed to {{ $value }}."
+
+      - alert: ContractUnpaused
+        expr: changes(audit_ledger_governance_paused[5m]) > 0 and audit_ledger_governance_paused == 0
+        labels:
+          severity: info
+        annotations:
+          summary: "Contract has been unpaused"
+          description: "The AuditLedger contract is now active again."
