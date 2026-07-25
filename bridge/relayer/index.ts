@@ -178,10 +178,6 @@ function startHealthServer(): void {
 
 // ── Proof builder ─────────────────────────────────────────────────────────────
 
-/**
- * Builds and signs an EventProof.
- * Signs: keccak256(abi.encodePacked(ledgerSeq, txHash, eventHash))
- */
 function buildProof(event: AuditEvent, relayKey: Buffer): EventProof {
   const ledgerSeqBuf = Buffer.alloc(8);
   ledgerSeqBuf.writeBigUInt64BE(BigInt(event.ledger_seq ?? 0));
@@ -190,7 +186,6 @@ function buildProof(event: AuditEvent, relayKey: Buffer): EventProof {
   const eventHashBuf = Buffer.from(event.event_hash.replace(/^0x/, ""), "hex");
 
   const preimage = Buffer.concat([ledgerSeqBuf, txHashBuf, eventHashBuf]);
-  const msgHash = createHash("sha256").update(preimage).digest();
 
   const signer = createSign("SHA256");
   signer.update(preimage);
@@ -256,6 +251,8 @@ async function fetchLatestEvents(afterIndex: number): Promise<AuditEvent[]> {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
+const MAX_EVM_RETRIES = 3;
+
 async function run(): Promise<void> {
   relayerState.lastProcessedIndex = 0;
   const relayKey = RELAY_PRIVATE_KEY_HEX ? Buffer.from(RELAY_PRIVATE_KEY_HEX, "hex") : Buffer.alloc(32);
@@ -271,6 +268,7 @@ async function run(): Promise<void> {
 
   while (true) {
     try {
+      await stellarLimiter.waitForToken();
       const events = await fetchLatestEvents(relayerState.lastProcessedIndex);
 
       if (events.length === 0) {

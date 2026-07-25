@@ -8,23 +8,50 @@ app.use(bodyParser.json());
 const server = require('http').createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Map of ws -> Set of subscribed types (string). Empty set = subscribed all
+// Map of ws -> filter state
 const subs = new Map();
 
+function createFilterState() {
+  return { types: new Set(), submitters: new Set(), startTime: null, endTime: null };
+}
+
+function matchesFilter(filter, evt) {
+  if (filter.types.size > 0 && !filter.types.has(evt.event_type)) return false;
+  if (filter.submitters.size > 0 && !filter.submitters.has(evt.submitter)) return false;
+  if (filter.startTime !== null && evt.timestamp < filter.startTime) return false;
+  if (filter.endTime !== null && evt.timestamp > filter.endTime) return false;
+  return true;
+}
+
 wss.on('connection', (ws) => {
-  subs.set(ws, new Set());
+  subs.set(ws, createFilterState());
   ws.isAlive = true;
   ws.on('pong', () => ws.isAlive = true);
 
   ws.on('message', (msg) => {
     try {
       const data = JSON.parse(msg);
+      const filter = subs.get(ws);
+
       if (data.action === 'subscribe') {
-        subs.get(ws).add(data.type);
+        if (data.type) filter.types.add(data.type);
+        if (data.submitter) filter.submitters.add(data.submitter);
+        if (data.startTime != null) filter.startTime = data.startTime;
+        if (data.endTime != null) filter.endTime = data.endTime;
+        if (data.filters) {
+          if (data.filters.types) data.filters.types.forEach((t) => filter.types.add(t));
+          if (data.filters.submitters) data.filters.submitters.forEach((s) => filter.submitters.add(s));
+          if (data.filters.startTime != null) filter.startTime = data.filters.startTime;
+          if (data.filters.endTime != null) filter.endTime = data.filters.endTime;
+        }
       } else if (data.action === 'subscribe_all') {
-        subs.get(ws).clear();
+        subs.set(ws, createFilterState());
       } else if (data.action === 'unsubscribe') {
-        subs.get(ws).delete(data.type);
+        if (data.type) filter.types.delete(data.type);
+        if (data.submitter) filter.submitters.delete(data.submitter);
+        if (data.clearStartTime) filter.startTime = null;
+        if (data.clearEndTime) filter.endTime = null;
+        if (data.clearTimeRange) { filter.startTime = null; filter.endTime = null; }
       }
     } catch (e) {
       // ignore
@@ -35,10 +62,9 @@ wss.on('connection', (ws) => {
 });
 
 function broadcastEvent(evt) {
-  for (const [ws, set] of subs.entries()) {
+  for (const [ws, filter] of subs.entries()) {
     if (ws.readyState !== WebSocket.OPEN) continue;
-    // if set empty => subscribed_all
-    if (set.size === 0 || set.has(evt.event_type)) {
+    if (matchesFilter(filter, evt)) {
       ws.send(JSON.stringify({ type: 'event_logged', event: evt }));
     }
   }
