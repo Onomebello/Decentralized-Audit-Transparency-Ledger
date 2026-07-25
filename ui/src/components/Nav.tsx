@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, Monitor } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV = [
@@ -12,9 +12,22 @@ const NAV = [
   { href: "/governance", label: "Governance" },
 ];
 
+const THEME_ORDER: Array<"dark" | "light" | "system"> = ["dark", "light", "system"];
+const THEME_ICONS = { dark: Sun, light: Moon, system: Monitor };
+const THEME_LABELS = {
+  dark: "Switch to light mode",
+  light: "Switch to system mode",
+  system: "Switch to dark mode",
+};
+
 export default function Nav() {
   const path = usePathname();
-  const { theme, toggle } = useTheme();
+  const { preference, setPreference } = useTheme();
+  const cycle = () => {
+    const idx = THEME_ORDER.indexOf(preference);
+    setPreference(THEME_ORDER[(idx + 1) % THEME_ORDER.length]);
+  };
+  const Icon = THEME_ICONS[preference];
   return (
     <nav
       style={{
@@ -44,12 +57,13 @@ export default function Nav() {
         </Link>
       ))}
       <button
-        onClick={toggle}
-        aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        onClick={cycle}
+        aria-label={THEME_LABELS[preference]}
         className="secondary"
         style={{ marginLeft: "auto", padding: "6px 10px", display: "flex", alignItems: "center" }}
+        title={`Theme: ${preference}`}
       >
-        {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        <Icon size={16} />
       </button>
     </nav>
   );
