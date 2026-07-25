@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { fetchTotalEvents, fetchEventPage } from "@/lib/contract";
+import { SectionErrorBoundary } from "@/components/PageErrorBoundary";
 import type { AuditEvent } from "@/types";
 
 const COLORS = [
@@ -68,6 +69,7 @@ export default function DashboardClient() {
     );
 
   return (
+    <SectionErrorBoundary title="Dashboard">
     <div>
       {/* Stats row */}
       <div className="grid-4 mb-6">
@@ -179,6 +181,7 @@ export default function DashboardClient() {
           </table>
         )}
       </div>
+    </SectionErrorBoundary>
     </div>
   );
 }

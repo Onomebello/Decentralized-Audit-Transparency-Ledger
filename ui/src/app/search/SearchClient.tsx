@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { searchEvents } from "@/lib/contract";
+import { SectionErrorBoundary } from "@/components/PageErrorBoundary";
 import type { AuditEvent, SearchFilters } from "@/types";
 
 export default function SearchClient() {
@@ -81,6 +82,8 @@ export default function SearchClient() {
 
       {error && <p style={{ color: "var(--error)", marginBottom: 16 }}>{error}</p>}
 
+    <SectionErrorBoundary title="Search">
+    <div>
       {results !== null && (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
@@ -129,5 +132,7 @@ export default function SearchClient() {
         </div>
       )}
     </div>
+    </div>
+    </SectionErrorBoundary>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { fetchTotalEvents, fetchEventPage } from "@/lib/contract";
+import { SectionErrorBoundary } from "@/components/PageErrorBoundary";
 import type { AuditEvent } from "@/types";
 
 const PAGE_SIZE = 20;
@@ -65,6 +66,23 @@ function applyFilters(
   });
 }
 
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: copied ? "var(--success)" : "var(--text-muted)" }}
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 export default function ExplorerClient() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [total, setTotal] = useState(0);
@@ -126,6 +144,7 @@ export default function ExplorerClient() {
     );
 
   return (
+    <SectionErrorBoundary title="Event Explorer">
     <div>
       {/* Filters */}
       <div className="card mb-4" style={{ padding: 16 }}>
@@ -330,5 +349,6 @@ export default function ExplorerClient() {
         </div>
       )}
     </div>
+    </SectionErrorBoundary>
   );
 }

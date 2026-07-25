@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { PageErrorBoundary } from "@/components/PageErrorBoundary";
 
 export const metadata: Metadata = {
   title: "AuditLedger Explorer",
@@ -23,7 +24,9 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <PageErrorBoundary>{children}</PageErrorBoundary>
+        </ThemeProvider>
       </body>
     </html>
   );

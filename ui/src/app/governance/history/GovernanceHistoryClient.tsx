@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { SectionErrorBoundary } from "@/components/PageErrorBoundary";
 
 const GRAPHQL_URL =
   process.env.NEXT_PUBLIC_GRAPHQL_URL ?? "http://localhost:4000/graphql";
@@ -88,6 +89,7 @@ export default function GovernanceHistoryClient() {
   }
 
   return (
+    <SectionErrorBoundary title="Governance History">
     <div>
       {/* Filter bar */}
       <div className="card mb-6" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -182,5 +184,6 @@ export default function GovernanceHistoryClient() {
         </button>
       </div>
     </div>
+    </SectionErrorBoundary>
   );
 }
