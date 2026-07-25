@@ -65,6 +65,13 @@ export default function DashboardClient() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
+  const { status: wsStatus, events: wsEvents } = useWebSocket({
+    onEvent: () => {
+      // Auto-refresh data when new events arrive via WebSocket
+      load();
+    },
+  });
+
   const load = useCallback(async () => {
     try {
       const t = await fetchTotalEvents();
@@ -133,15 +140,35 @@ export default function DashboardClient() {
         <div className="card">
           <p className="text-muted text-sm">Most Recent</p>
           <p className="stat-value" style={{ fontSize: 14 }}>
-            {recent[0]
-              ? new Date(recent[0].timestamp * 1000).toLocaleTimeString()
+            {displayRecent[0]
+              ? new Date(displayRecent[0].timestamp * 1000).toLocaleTimeString()
               : "—"}
           </p>
         </div>
         <div className="card">
-          <p className="text-muted text-sm">Last Refreshed</p>
-          <p className="stat-value" style={{ fontSize: 14 }}>
-            {lastUpdated?.toLocaleTimeString() ?? "—"}
+          <div className="flex-between">
+            <div>
+              <p className="text-muted text-sm">Connection</p>
+              <p className="stat-value" style={{ fontSize: 14, color: STATUS_COLORS[wsStatus] }}>
+                {STATUS_LABELS[wsStatus]}
+              </p>
+            </div>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: STATUS_COLORS[wsStatus],
+                boxShadow: wsStatus === "connected"
+                  ? `0 0 8px ${STATUS_COLORS[wsStatus]}`
+                  : "none",
+              }}
+            />
+          </div>
+          <p className="text-muted text-sm" style={{ marginTop: 4 }}>
+            {wsEvents.length > 0
+              ? `${wsEvents.length} live event${wsEvents.length !== 1 ? "s" : ""} this session`
+              : "Real-time updates"}
           </p>
         </div>
       </div>
@@ -302,7 +329,7 @@ export default function DashboardClient() {
             Refresh
           </button>
         </div>
-        {recent.length === 0 ? (
+        {displayRecent.length === 0 ? (
           <p className="text-muted">No events logged yet.</p>
         ) : (
           <div style={{ overflowX: "auto" }}>

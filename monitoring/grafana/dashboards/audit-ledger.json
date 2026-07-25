@@ -173,15 +173,92 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Error Rate",
-      "description": "Failed transaction count over time",
+      "title": "Event Logging Rate",
+      "description": "Events logged per second since last scrape",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
       "targets": [
         {
-          "expr": "rate(audit_ledger_error_count[5m])",
-          "legendFormat": "errors/s",
+          "expr": "audit_ledger_event_logging_rate",
+          "legendFormat": "events/s",
           "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Query Latency (ms)",
+      "description": "P50, P95, P99 contract query latency",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(audit_ledger_query_duration_ms_bucket[5m]))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(audit_ledger_query_duration_ms_bucket[5m]))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(audit_ledger_query_duration_ms_bucket[5m]))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Query Rate by Method",
+      "description": "Successful and failed queries per second",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum by (method) (rate(audit_ledger_query_total{status=\"ok\"}[5m]))",
+          "legendFormat": "{{method}} ok",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (method) (rate(audit_ledger_query_total{status=\"error\"}[5m]))",
+          "legendFormat": "{{method}} error",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Error Rate by Category",
+      "description": "Errors broken down by category",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "targets": [
+        {
+          "expr": "sum by (category) (rate(audit_ledger_error_total[5m]))",
+          "legendFormat": "{{category}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (error_type) (rate(audit_ledger_rpc_errors_total[5m]))",
+          "legendFormat": "rpc: {{error_type}}",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -191,12 +268,169 @@
       }
     },
     {
-      "id": 8,
+      "id": 11,
+      "type": "timeseries",
+      "title": "Scrape Duration",
+      "description": "Time taken for each full scrape cycle",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(audit_ledger_scrape_duration_ms_bucket[5m]))",
+          "legendFormat": "scrape p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(audit_ledger_scrape_duration_ms_bucket[5m]))",
+          "legendFormat": "scrape p95",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Governance",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Owners",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 41 },
+      "targets": [
+        {
+          "expr": "audit_ledger_governance_owners",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Required Sigs",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 41 },
+      "targets": [
+        {
+          "expr": "audit_ledger_governance_required_signatures",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Paused",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 41 },
+      "targets": [
+        {
+          "expr": "audit_ledger_governance_paused",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "mappings": [
+          { "type": "value", "options": { "0": { "text": "Active", "color": "green" }, "1": { "text": "Paused", "color": "red" } } }
+        ],
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Emission Mode",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 41 },
+      "targets": [
+        {
+          "expr": "audit_ledger_governance_emission_mode",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "mappings": [
+          { "type": "value", "options": { "0": { "text": "None" }, "1": { "text": "Normal" }, "2": { "text": "Low Cost" } } }
+        ],
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Allowlist",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 41 },
+      "targets": [
+        {
+          "expr": "audit_ledger_governance_allowlist_enabled",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "mappings": [
+          { "type": "value", "options": { "0": { "text": "Disabled" }, "1": { "text": "Enabled" } } }
+        ],
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Webhooks",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 41 },
+      "targets": [
+        {
+          "expr": "audit_ledger_governance_webhooks",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 19,
       "type": "timeseries",
       "title": "Average Gas Cost per Event",
       "description": "Mean gas/fee cost per log_event invocation over time",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 45 },
       "targets": [
         {
           "expr": "audit_ledger_avg_gas_cost",
@@ -206,41 +440,19 @@
       ]
     },
     {
-      "id": 9,
-      "type": "stat",
-      "title": "Hash Chain Integrity",
-      "description": "1 = chain intact, 0 = integrity violation detected",
+      "id": 20,
+      "type": "timeseries",
+      "title": "Events by Category",
+      "description": "Event counts per category over time",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 32 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 45 },
       "targets": [
         {
-          "expr": "audit_ledger_chain_integrity_ok",
-          "legendFormat": "{{contract_id}}",
+          "expr": "audit_ledger_category_count",
+          "legendFormat": "{{category}}",
           "refId": "A"
         }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "background"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            { "type": "value", "options": { "0": { "text": "BROKEN", "color": "red" }, "1": { "text": "OK", "color": "green" } } }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
-            ]
-          },
-          "min": 0,
-          "max": 1
-        }
-      }
+      ]
     }
   ],
   "refresh": "30s",

@@ -38,7 +38,7 @@ groups:
           description: "global_max_logs is 0, blocking all new event logging."
 
       - alert: AuditLedgerPaused
-        expr: audit_ledger_paused == 1
+        expr: audit_ledger_governance_paused == 1
         for: 30m
         labels:
           severity: critical
