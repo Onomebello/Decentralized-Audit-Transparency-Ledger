@@ -10,6 +10,14 @@
   --success: #34d399;
   --warn: #fbbf24;
   --error: #f87171;
+  --chart-1: #4f8ef7;
+  --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #a78bfa;
+  --chart-6: #fb923c;
+  --chart-grid: #2a2d3e;
+  --chart-tooltip-bg: #1a1d27;
 }
 
 [data-theme="light"] {
@@ -23,6 +31,14 @@
   --success: #059669;
   --warn: #d97706;
   --error: #dc2626;
+  --chart-1: #2563eb;
+  --chart-2: #059669;
+  --chart-3: #d97706;
+  --chart-4: #dc2626;
+  --chart-5: #7c3aed;
+  --chart-6: #ea580c;
+  --chart-grid: #e2e8f0;
+  --chart-tooltip-bg: #ffffff;
 }
 
 * {

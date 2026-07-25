@@ -52,7 +52,31 @@ app.post('/emit', (req, res) => {
   res.send('ok');
 });
 
-// Health
+// Health check endpoints (#268)
+const wsStartTime = Date.now();
+
+app.get('/healthz', (req, res) => res.json({
+  status: 'ok',
+  service: 'websocket',
+  uptime: Math.floor((Date.now() - wsStartTime) / 1000),
+  connections: subs.size,
+  timestamp: new Date().toISOString(),
+}));
+
+app.get('/readyz', (req, res) => {
+  const checks = {
+    websocket: { status: wss.readyState === 0 ? 'ok' : 'degraded' },
+  };
+  const allHealthy = Object.values(checks).every((c) => c.status === 'ok');
+  res.status(allHealthy ? 200 : 503).json({
+    status: allHealthy ? 'ready' : 'not_ready',
+    service: 'websocket',
+    checks,
+    connections: subs.size,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Periodic ping for connection health
