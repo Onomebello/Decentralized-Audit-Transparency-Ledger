@@ -76,6 +76,8 @@ All governance functions publish a typed Soroban event with topic `("governance"
 
 For a high-level view of how the contract, SDKs, APIs, bridge, monitoring, and UI fit together, see [docs/architecture.md](docs/architecture.md).
 
+For backup, recovery, failover, and DR testing procedures, see [docs/disaster-recovery.md](docs/disaster-recovery.md).
+
 ## Quick Start
 
 ```bash
