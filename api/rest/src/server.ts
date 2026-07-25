@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 
-// Import resolvers from GraphQL service
 import { resolvers } from "../graphql/src/resolvers";
 import { exportCsv, exportJson, createStreamingExporter, ExportOptions } from "./export";
 
@@ -10,6 +9,7 @@ const port = process.env.PORT || 3002;
 
 app.use(cors());
 app.use(express.json());
+app.use(rateLimiter);
 
 // ── Health Check Endpoints (#268) ─────────────────────────────────────────────
 
@@ -99,8 +99,24 @@ v1.get("/events", (req, res) => {
   const offset = parseInt(req.query.offset as string) || 0;
   const filter = req.query.filter ? JSON.parse(req.query.filter as string) : null;
 
-  const result = resolvers.Query.events(null, { limit, offset, filter }, null);
-  res.json({ data: result, total: result.length });
+  let offset = 0;
+  if (req.query.cursor) {
+    const decoded = decodeCursor(req.query.cursor as string);
+    if (!decoded) {
+      return res.status(400).json({ error: "Invalid cursor" });
+    }
+    offset = decoded.index;
+  }
+
+  const allFiltered = resolvers.Query.events(null, { limit: 100000, offset: 0, filter }, null);
+  const total = allFiltered.length;
+  const result = allFiltered.slice(offset, offset + limit);
+
+  const nextCursor = offset + limit < total ? encodeCursor(offset + limit) : null;
+  const prevCursor = offset > 0 ? encodeCursor(Math.max(0, offset - limit)) : null;
+
+  setPaginationHeaders(res, "/events", total, limit, offset, nextCursor, prevCursor);
+  res.json({ data: result });
 });
 
 // GET /events/:index - Get event by index
@@ -117,15 +133,29 @@ v1.get("/events/:index", (req, res) => {
 // GET /events/type/:type - Get events by type with pagination
 v1.get("/events/type/:type", (req, res) => {
   const type = req.params.type;
-  const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
-  const offset = parseInt(req.query.offset as string) || 0;
+  const limit = parseLimit(req.query.limit as string);
 
-  const allByType = Array.from({ length: 1000 }, (_, i) => i).map((typeIndex) =>
-    resolvers.Query.eventByType(null, { type, typeIndex }, null)
-  ).filter(Boolean);
+  let offset = 0;
+  if (req.query.cursor) {
+    const decoded = decodeCursor(req.query.cursor as string);
+    if (!decoded) {
+      return res.status(400).json({ error: "Invalid cursor" });
+    }
+    offset = decoded.index;
+  }
 
+  const allByType = Array.from({ length: 1000 }, (_, i) => i)
+    .map((typeIndex) => resolvers.Query.eventByType(null, { type, typeIndex }, null))
+    .filter(Boolean);
+
+  const total = allByType.length;
   const result = allByType.slice(offset, offset + limit);
-  res.json({ data: result, total: allByType.length });
+
+  const nextCursor = offset + limit < total ? encodeCursor(offset + limit) : null;
+  const prevCursor = offset > 0 ? encodeCursor(Math.max(0, offset - limit)) : null;
+
+  setPaginationHeaders(res, `/events/type/${type}`, total, limit, offset, nextCursor, prevCursor);
+  res.json({ data: result });
 });
 
 // GET /stats - Get statistics
