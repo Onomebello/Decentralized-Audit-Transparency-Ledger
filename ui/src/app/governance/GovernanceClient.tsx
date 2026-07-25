@@ -48,7 +48,6 @@ async function signAndSubmit(
   }
 }
 
-/** Freighter wallet integration */
 async function freighterSign(txXdr: string): Promise<string> {
   // @ts-expect-error – Freighter injects window.freighter at runtime
   const { signTransaction } = window.freighter;
@@ -87,7 +86,6 @@ export default function GovernanceClient() {
     else showStatus(`✗ Error: ${result.error}`, true);
   }
 
-  // Form state
   const [newGlobalMax, setNewGlobalMax] = useState("");
   const [evtType, setEvtType] = useState("");
   const [evtMax, setEvtMax] = useState("");
@@ -109,12 +107,13 @@ export default function GovernanceClient() {
               {walletKey ?? "Not connected. Use Freighter browser extension."}
             </p>
           </div>
-          <button onClick={connectFreighter}>
+          <button onClick={connectFreighter} aria-label={walletKey ? "Reconnect wallet" : "Connect Freighter wallet"}>
             {walletKey ? "Reconnect" : "Connect Freighter"}
           </button>
         </div>
         {status && (
           <p
+            role={isError ? "alert" : "status"}
             style={{
               marginTop: 12,
               color: isError ? "var(--error)" : "var(--success)",
@@ -131,7 +130,9 @@ export default function GovernanceClient() {
         {/* Set global max */}
         <div className="card">
           <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Global Max Logs</p>
+          <label htmlFor="gov-global-max" className="text-muted text-sm" style={{ display: "none" }}>New max</label>
           <input
+            id="gov-global-max"
             placeholder="New max (u32)"
             value={newGlobalMax}
             onChange={(e) => setNewGlobalMax(e.target.value)}
@@ -144,6 +145,7 @@ export default function GovernanceClient() {
                 nativeToScVal(parseInt(newGlobalMax, 10), { type: "u32" }),
               ])
             }
+            aria-label="Set global maximum logs"
           >
             Set
           </button>
@@ -152,13 +154,17 @@ export default function GovernanceClient() {
         {/* Set event max */}
         <div className="card">
           <p style={{ fontWeight: 600, marginBottom: 12 }}>Set Event Type Max Logs</p>
+          <label htmlFor="gov-evt-type" className="text-muted text-sm" style={{ display: "none" }}>Event type</label>
           <input
+            id="gov-evt-type"
             placeholder="Event type symbol"
             value={evtType}
             onChange={(e) => setEvtType(e.target.value)}
             style={{ marginBottom: 8 }}
           />
+          <label htmlFor="gov-evt-max" className="text-muted text-sm" style={{ display: "none" }}>Max</label>
           <input
+            id="gov-evt-max"
             placeholder="Max (u32)"
             value={evtMax}
             onChange={(e) => setEvtMax(e.target.value)}
@@ -172,6 +178,7 @@ export default function GovernanceClient() {
                 nativeToScVal(parseInt(evtMax, 10), { type: "u32" }),
               ])
             }
+            aria-label="Set event type maximum logs"
           >
             Set
           </button>
@@ -180,7 +187,9 @@ export default function GovernanceClient() {
         {/* Remove event cap */}
         <div className="card">
           <p style={{ fontWeight: 600, marginBottom: 12 }}>Remove Event Cap</p>
+          <label htmlFor="gov-remove-type" className="text-muted text-sm" style={{ display: "none" }}>Event type</label>
           <input
+            id="gov-remove-type"
             placeholder="Event type symbol"
             value={removeType}
             onChange={(e) => setRemoveType(e.target.value)}
@@ -193,6 +202,7 @@ export default function GovernanceClient() {
                 xdr.ScVal.scvSymbol(removeType),
               ])
             }
+            aria-label="Remove event type cap"
           >
             Remove Cap
           </button>
@@ -201,7 +211,9 @@ export default function GovernanceClient() {
         {/* Transfer ownership */}
         <div className="card">
           <p style={{ fontWeight: 600, marginBottom: 12 }}>Transfer Ownership</p>
+          <label htmlFor="gov-new-owner" className="text-muted text-sm" style={{ display: "none" }}>New owner</label>
           <input
+            id="gov-new-owner"
             placeholder="New owner address (G…)"
             value={newOwner}
             onChange={(e) => setNewOwner(e.target.value)}
@@ -215,6 +227,7 @@ export default function GovernanceClient() {
                 Address.fromString(newOwner).toScVal(),
               ])
             }
+            aria-label="Transfer contract ownership"
           >
             Transfer Ownership
           </button>

@@ -124,6 +124,7 @@ input, select {
   font-size: 14px;
   outline: none;
   width: 100%;
+  min-height: 44px;
 }
 input:focus, select:focus {
   border-color: var(--accent);
@@ -139,9 +140,14 @@ button {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
+  min-height: 44px;
 }
 button:hover {
   background: var(--accent-hover);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 button.secondary {
   background: var(--surface);
@@ -161,10 +167,6 @@ button.secondary:hover {
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-@media (max-width: 768px) {
-  .grid-2, .grid-4 { grid-template-columns: 1fr; }
-}
-
 .flex { display: flex; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .gap-2 { gap: 8px; }

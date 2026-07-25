@@ -106,8 +106,8 @@ export default function ExplorerClient() {
   }
 
   function SortIcon({ k }: { k: SortKey }) {
-    if (sortKey !== k) return <span style={{ opacity: 0.3 }}> ↕</span>;
-    return <span>{sortAsc ? " ↑" : " ↓"}</span>;
+    if (sortKey !== k) return <span aria-hidden="true" style={{ opacity: 0.3 }}> ↕</span>;
+    return <span aria-hidden="true">{sortAsc ? " ↑" : " ↓"}</span>;
   }
 
   // Build filter chips
@@ -124,7 +124,7 @@ export default function ExplorerClient() {
 
   if (error)
     return (
-      <p style={{ color: "var(--error)" }}>Error loading events: {error}</p>
+      <p role="alert" style={{ color: "var(--error)" }}>Error loading events: {error}</p>
     );
 
   return (
@@ -189,11 +189,11 @@ export default function ExplorerClient() {
         <p className="text-muted">
           {hasActiveFilters ? `${sorted.length} matching` : `${total} total`} events · Page {page + 1} of {Math.max(totalPages, 1)}
         </p>
-        <div className="flex gap-2">
-          <button className="secondary" onClick={() => exportAs(sorted, "csv")}>
+        <div className="flex gap-2 export-buttons">
+          <button className="secondary" onClick={() => exportAs(sorted, "csv")} aria-label="Export filtered events as CSV">
             Export CSV
           </button>
-          <button className="secondary" onClick={() => exportAs(sorted, "json")}>
+          <button className="secondary" onClick={() => exportAs(sorted, "json")} aria-label="Export filtered events as JSON">
             Export JSON
           </button>
         </div>
@@ -260,10 +260,11 @@ export default function ExplorerClient() {
           className="secondary"
           disabled={page === 0}
           onClick={() => setPage((p) => p - 1)}
+          aria-label="Go to previous page"
         >
           ← Previous
         </button>
-        <span className="text-muted">
+        <span className="text-muted" aria-live="polite">
           {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of{" "}
           {total}
         </span>
@@ -271,10 +272,36 @@ export default function ExplorerClient() {
           className="secondary"
           disabled={page >= totalPages - 1}
           onClick={() => setPage((p) => p + 1)}
+          aria-label="Go to next page"
         >
           Next →
         </button>
       </div>
     </div>
+  );
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API not available
+    }
+  }
+
+  return (
+    <button
+      className="secondary"
+      onClick={(e) => { e.stopPropagation(); copy(); }}
+      style={{ marginLeft: 8, padding: "4px 8px", fontSize: 11, minHeight: "auto" }}
+      aria-label={copied ? "Copied to clipboard" : "Copy submitter address"}
+    >
+      {copied ? "✓ Copied" : "Copy"}
+    </button>
   );
 }

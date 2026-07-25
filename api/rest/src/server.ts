@@ -122,6 +122,10 @@ v1.get("/events", (req, res) => {
 // GET /events/:index - Get event by index
 v1.get("/events/:index", (req, res) => {
   const index = parseInt(req.params.index);
+  if (isNaN(index) || index < 0) {
+    return res.status(400).json({ error: "index must be a non-negative integer" });
+  }
+
   const result = resolvers.Query.event(null, { index }, null);
 
   if (!result) {

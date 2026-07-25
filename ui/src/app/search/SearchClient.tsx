@@ -147,24 +147,27 @@ export default function SearchClient() {
 
         <div className="grid-2 gap-4 mb-4">
           <div>
-            <label className="text-muted text-sm">Event Type</label>
+            <label htmlFor="search-type" className="text-muted text-sm">Event Type</label>
             <input
+              id="search-type"
               placeholder="e.g. payment"
               value={filters.event_type ?? ""}
               onChange={(e) => set("event_type", e.target.value)}
             />
           </div>
           <div>
-            <label className="text-muted text-sm">Submitter Address</label>
+            <label htmlFor="search-submitter" className="text-muted text-sm">Submitter Address</label>
             <input
+              id="search-submitter"
               placeholder="G…"
               value={filters.submitter ?? ""}
               onChange={(e) => set("submitter", e.target.value)}
             />
           </div>
           <div>
-            <label className="text-muted text-sm">Metadata contains (hex)</label>
+            <label htmlFor="search-metadata" className="text-muted text-sm">Metadata contains (hex)</label>
             <input
+              id="search-metadata"
               placeholder="hex substring"
               value={filters.metadata ?? ""}
               onChange={(e) => set("metadata", e.target.value)}
@@ -172,16 +175,18 @@ export default function SearchClient() {
           </div>
           <div className="flex gap-2">
             <div style={{ flex: 1 }}>
-              <label className="text-muted text-sm">From</label>
+              <label htmlFor="search-from" className="text-muted text-sm">From</label>
               <input
+                id="search-from"
                 type="date"
                 value={filters.dateFrom ?? ""}
                 onChange={(e) => set("dateFrom", e.target.value)}
               />
             </div>
             <div style={{ flex: 1 }}>
-              <label className="text-muted text-sm">To</label>
+              <label htmlFor="search-to" className="text-muted text-sm">To</label>
               <input
+                id="search-to"
                 type="date"
                 value={filters.dateTo ?? ""}
                 onChange={(e) => set("dateTo", e.target.value)}
@@ -272,18 +277,9 @@ export default function SearchClient() {
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
             <span className="text-muted">{results.length} result(s) found</span>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Type</th>
-                <th>Submitter</th>
-                <th>Timestamp</th>
-                <th>Metadata</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.length === 0 ? (
+          <div style={{ overflowX: "auto" }}>
+            <table aria-label="Search results">
+              <thead>
                 <tr>
                   <td colSpan={5} className="text-muted" style={{ textAlign: "center", padding: 32 }}>
                     No matching events found. Try adjusting your filters.
@@ -307,10 +303,30 @@ export default function SearchClient() {
                     <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
                     <td className="mono">{tryDecodeMetadata(evt.metadata).slice(0, 40)}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  results.map((evt) => (
+                    <tr key={evt.index}>
+                      <td>{evt.index}</td>
+                      <td>
+                        <span className="badge">{evt.event_type}</span>
+                      </td>
+                      <td className="mono">{evt.submitter.slice(0, 16)}…</td>
+                      <td>{new Date(evt.timestamp * 1000).toLocaleString()}</td>
+                      <td className="mono">
+                        {(() => {
+                          try {
+                            return Buffer.from(evt.metadata, "hex").toString("utf8").slice(0, 40);
+                          } catch {
+                            return evt.metadata.slice(0, 40);
+                          }
+                        })()}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
