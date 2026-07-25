@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, Moon, Menu, X } from "lucide-react";
+import { Sun, Moon, Monitor } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { useState, useCallback, useEffect } from "react";
 
@@ -12,25 +12,22 @@ const NAV = [
   { href: "/governance", label: "Governance" },
 ];
 
+const THEME_ORDER: Array<"dark" | "light" | "system"> = ["dark", "light", "system"];
+const THEME_ICONS = { dark: Sun, light: Moon, system: Monitor };
+const THEME_LABELS = {
+  dark: "Switch to light mode",
+  light: "Switch to system mode",
+  system: "Switch to dark mode",
+};
+
 export default function Nav() {
   const path = usePathname();
-  const { theme, toggle } = useTheme();
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const closeMenu = useCallback(() => setMenuOpen(false), []);
-
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [path]);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && menuOpen) setMenuOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen]);
-
+  const { preference, setPreference } = useTheme();
+  const cycle = () => {
+    const idx = THEME_ORDER.indexOf(preference);
+    setPreference(THEME_ORDER[(idx + 1) % THEME_ORDER.length]);
+  };
+  const Icon = THEME_ICONS[preference];
   return (
     <nav className="nav-bar" role="navigation" aria-label="Main navigation">
       <Link href="/" className="nav-brand">
@@ -38,13 +35,13 @@ export default function Nav() {
       </Link>
 
       <button
-        className="nav-toggle"
-        onClick={() => setMenuOpen((o) => !o)}
-        aria-expanded={menuOpen}
-        aria-controls="mobile-menu"
-        aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+        onClick={cycle}
+        aria-label={THEME_LABELS[preference]}
+        className="secondary"
+        style={{ marginLeft: "auto", padding: "6px 10px", display: "flex", alignItems: "center" }}
+        title={`Theme: ${preference}`}
       >
-        {menuOpen ? <X size={20} /> : <Menu size={20} />}
+        <Icon size={16} />
       </button>
 
       <div

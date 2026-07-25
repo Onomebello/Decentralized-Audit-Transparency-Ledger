@@ -1,164 +1,126 @@
 import express from "express";
 import cors from "cors";
 
-// Import resolvers from GraphQL service
 import { resolvers } from "../graphql/src/resolvers";
+import { exportCsv, exportJson, createStreamingExporter, ExportOptions } from "./export";
 
 const app = express();
 const port = process.env.PORT || 3002;
 
 app.use(cors());
 app.use(express.json());
+app.use(rateLimiter);
 
-interface FilterParams {
-  type?: string;
-  submitter?: string;
-  metadata?: string;
-  startTime?: number;
-  endTime?: number;
-  sort?: "index" | "timestamp" | "event_type" | "submitter";
-  order?: "asc" | "desc";
-}
+// ── Health Check Endpoints (#268) ─────────────────────────────────────────────
 
-function parseFilterParams(query: Record<string, unknown>): {
-  filter: FilterParams | null;
-  errors: string[];
-} {
-  const errors: string[] = [];
-  const filter: FilterParams = {};
+const startTime = Date.now();
 
-  if (query.type !== undefined) {
-    const type = String(query.type).trim();
-    if (type.length === 0) errors.push("type cannot be empty");
-    else if (type.length > 128) errors.push("type exceeds max length of 128");
-    else filter.type = type;
-  }
-
-  if (query.submitter !== undefined) {
-    const submitter = String(query.submitter).trim();
-    if (submitter.length === 0) errors.push("submitter cannot be empty");
-    else if (submitter.length > 128) errors.push("submitter exceeds max length of 128");
-    else filter.submitter = submitter;
-  }
-
-  if (query.metadata !== undefined) {
-    const metadata = String(query.metadata).trim();
-    if (metadata.length === 0) errors.push("metadata cannot be empty");
-    else if (metadata.length > 256) errors.push("metadata exceeds max length of 256");
-    else filter.metadata = metadata;
-  }
-
-  if (query.startTime !== undefined) {
-    const ts = Number(query.startTime);
-    if (Number.isNaN(ts) || ts < 0) errors.push("startTime must be a non-negative integer (unix seconds)");
-    else filter.startTime = Math.floor(ts);
-  }
-
-  if (query.endTime !== undefined) {
-    const ts = Number(query.endTime);
-    if (Number.isNaN(ts) || ts < 0) errors.push("endTime must be a non-negative integer (unix seconds)");
-    else filter.endTime = Math.floor(ts);
-  }
-
-  if (filter.startTime !== undefined && filter.endTime !== undefined && filter.startTime > filter.endTime) {
-    errors.push("startTime must be <= endTime");
-  }
-
-  const VALID_SORT_FIELDS = new Set(["index", "timestamp", "event_type", "submitter"]);
-  if (query.sort !== undefined) {
-    const sort = String(query.sort);
-    if (!VALID_SORT_FIELDS.has(sort)) errors.push(`sort must be one of: ${[...VALID_SORT_FIELDS].join(", ")}`);
-    else filter.sort = sort as FilterParams["sort"];
-  }
-
-  const VALID_ORDERS = new Set(["asc", "desc"]);
-  if (query.order !== undefined) {
-    const order = String(query.order).toLowerCase();
-    if (!VALID_ORDERS.has(order)) errors.push("order must be 'asc' or 'desc'");
-    else filter.order = order as FilterParams["order"];
-  }
-
-  if (errors.length > 0) return { filter: null, errors };
-  return { filter: Object.keys(filter).length > 0 ? filter : null, errors: [] };
-}
-
-function applyServerSideFilter(
-  events: any[],
-  filter: FilterParams | null
-): any[] {
-  if (!filter) return events;
-
-  let result = events;
-
-  if (filter.type) {
-    const needle = filter.type.toLowerCase();
-    result = result.filter((e) => e.event_type.toLowerCase().includes(needle));
-  }
-  if (filter.submitter) {
-    const needle = filter.submitter.toLowerCase();
-    result = result.filter((e) => e.submitter.toLowerCase().includes(needle));
-  }
-  if (filter.metadata) {
-    const needle = filter.metadata.toLowerCase();
-    result = result.filter((e) => e.metadata.toLowerCase().includes(needle));
-  }
-  if (filter.startTime !== undefined) {
-    result = result.filter((e) => e.timestamp >= filter.startTime!);
-  }
-  if (filter.endTime !== undefined) {
-    result = result.filter((e) => e.timestamp <= filter.endTime!);
-  }
-
-  return result;
-}
-
-function sortEvents(
-  events: any[],
-  sortKey: string | undefined,
-  order: string | undefined
-): any[] {
-  if (!sortKey) return events;
-
-  const ascending = order !== "desc";
-  return [...events].sort((a, b) => {
-    const av = a[sortKey];
-    const bv = b[sortKey];
-    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-    return ascending ? cmp : -cmp;
+app.get("/healthz", (_req, res) => {
+  res.json({
+    status: "ok",
+    uptime: Math.floor((Date.now() - startTime) / 1000),
+    timestamp: new Date().toISOString(),
   });
-}
+});
 
-// GET /events - List events with pagination and filtering
-app.get("/events", (req, res) => {
-  const limitRaw = parseInt(req.query.limit as string);
-  const offsetRaw = parseInt(req.query.offset as string);
+app.get("/readyz", (_req, res) => {
+  const checks: Record<string, { status: string; latencyMs?: number }> = {};
 
-  if (!isNaN(limitRaw) && (limitRaw < 1 || limitRaw > 1000)) {
-    return res.status(400).json({ error: "limit must be between 1 and 1000" });
-  }
-  if (!isNaN(offsetRaw) && offsetRaw < 0) {
-    return res.status(400).json({ error: "offset must be non-negative" });
-  }
-
-  const limit = Math.min(limitRaw || 50, 1000);
-  const offset = offsetRaw || 0;
-
-  const { filter, errors } = parseFilterParams(req.query as Record<string, unknown>);
-  if (errors.length > 0) {
-    return res.status(400).json({ error: "Invalid filter parameters", details: errors });
+  const storeCheckStart = Date.now();
+  try {
+    resolvers.Query.statistics(null, {}, null);
+    checks.eventStore = { status: "ok", latencyMs: Date.now() - storeCheckStart };
+  } catch {
+    checks.eventStore = { status: "failed", latencyMs: Date.now() - storeCheckStart };
   }
 
-  const allEvents = resolvers.Query.events(null, { limit: 10000, offset: 0, filter: null }, null);
-  const filtered = applyServerSideFilter(allEvents, filter);
-  const sorted = sortEvents(filtered, filter?.sort, filter?.order);
-  const total = sorted.length;
-  const page = sorted.slice(offset, offset + limit);
+  const allHealthy = Object.values(checks).every((c) => c.status === "ok");
+  const statusCode = allHealthy ? 200 : 503;
 
-  res.json({ data: page, total, limit, offset });
+  res.status(statusCode).json({
+    status: allHealthy ? "ready" : "not_ready",
+    checks,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/metrics", (_req, res) => {
+  const stats = resolvers.Query.statistics(null, {}, null) as Record<string, unknown>;
+  const byType = (stats.eventsByType as Record<string, number>) ?? {};
+  const lines = [
+    "# HELP audit_ledger_events_total Total number of audit events",
+    "# TYPE audit_ledger_events_total counter",
+    `audit_ledger_events_total ${stats.totalEvents ?? 0}`,
+    "",
+    "# HELP audit_ledger_events_by_type Events count by type",
+    "# TYPE audit_ledger_events_by_type gauge",
+    ...Object.entries(byType).map(([t, c]) => `audit_ledger_events_by_type{event_type="${t}"} ${c}`),
+    "",
+    "# HELP audit_ledger_uptime_seconds API uptime in seconds",
+    "# TYPE audit_ledger_uptime_seconds gauge",
+    `audit_ledger_uptime_seconds ${Math.floor((Date.now() - startTime) / 1000)}`,
+  ];
+  res.setHeader("Content-Type", "text/plain; version=0.0.4");
+  res.send(lines.join("\n"));
+});
+
+// ── Version Middleware (#271) ─────────────────────────────────────────────────
+
+const SUPPORTED_VERSIONS = ["v1"];
+const DEPRECATED_VERSIONS: Record<string, string> = {};
+const LATEST_VERSION = "v1";
+
+app.use((req, res, next) => {
+  res.setHeader("X-API-Version", LATEST_VERSION);
+  res.setHeader("X-Supported-Versions", SUPPORTED_VERSIONS.join(", "));
+
+  const versionHeader = req.headers["accept-version"] as string | undefined;
+  const urlMatch = req.path.match(/^\/(v\d+)\//);
+
+  let requestedVersion = versionHeader ?? urlMatch?.[1] ?? LATEST_VERSION;
+
+  if (DEPRECATED_VERSIONS[requestedVersion]) {
+    res.setHeader("Deprecation", "true");
+    res.setHeader("Sunset", DEPRECATED_VERSIONS[requestedVersion]);
+    res.setHeader("X-Deprecation-Notice", `API version ${requestedVersion} is deprecated. Use ${LATEST_VERSION}.`);
+  }
+
+  (req as express.Request & { apiVersion?: string }).apiVersion = requestedVersion;
+  next();
+});
+
+// ── Versioned Routes (#271) ───────────────────────────────────────────────────
+
+const v1 = express.Router();
+
+// GET /events - List all events with pagination
+v1.get("/events", (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 1000);
+  const offset = parseInt(req.query.offset as string) || 0;
+  const filter = req.query.filter ? JSON.parse(req.query.filter as string) : null;
+
+  let offset = 0;
+  if (req.query.cursor) {
+    const decoded = decodeCursor(req.query.cursor as string);
+    if (!decoded) {
+      return res.status(400).json({ error: "Invalid cursor" });
+    }
+    offset = decoded.index;
+  }
+
+  const allFiltered = resolvers.Query.events(null, { limit: 100000, offset: 0, filter }, null);
+  const total = allFiltered.length;
+  const result = allFiltered.slice(offset, offset + limit);
+
+  const nextCursor = offset + limit < total ? encodeCursor(offset + limit) : null;
+  const prevCursor = offset > 0 ? encodeCursor(Math.max(0, offset - limit)) : null;
+
+  setPaginationHeaders(res, "/events", total, limit, offset, nextCursor, prevCursor);
+  res.json({ data: result });
 });
 
 // GET /events/:index - Get event by index
-app.get("/events/:index", (req, res) => {
+v1.get("/events/:index", (req, res) => {
   const index = parseInt(req.params.index);
   if (isNaN(index) || index < 0) {
     return res.status(400).json({ error: "index must be a non-negative integer" });
@@ -172,67 +134,140 @@ app.get("/events/:index", (req, res) => {
   res.json({ data: result });
 });
 
-// GET /events/type/:type - Get events by type with pagination and filtering
-app.get("/events/type/:type", (req, res) => {
+// GET /events/type/:type - Get events by type with pagination
+v1.get("/events/type/:type", (req, res) => {
   const type = req.params.type;
-  if (!type || type.length > 128) {
-    return res.status(400).json({ error: "type is required and must be <= 128 characters" });
+  const limit = parseLimit(req.query.limit as string);
+
+  let offset = 0;
+  if (req.query.cursor) {
+    const decoded = decodeCursor(req.query.cursor as string);
+    if (!decoded) {
+      return res.status(400).json({ error: "Invalid cursor" });
+    }
+    offset = decoded.index;
   }
 
-  const limitRaw = parseInt(req.query.limit as string);
-  const offsetRaw = parseInt(req.query.offset as string);
-
-  if (!isNaN(limitRaw) && (limitRaw < 1 || limitRaw > 1000)) {
-    return res.status(400).json({ error: "limit must be between 1 and 1000" });
-  }
-  if (!isNaN(offsetRaw) && offsetRaw < 0) {
-    return res.status(400).json({ error: "offset must be non-negative" });
-  }
-
-  const limit = Math.min(limitRaw || 50, 1000);
-  const offset = offsetRaw || 0;
-
-  const allByType = Array.from({ length: 10000 }, (_, i) => i).map((typeIndex) =>
-    resolvers.Query.eventByType(null, { type, typeIndex }, null)
-  ).filter(Boolean);
+  const allByType = Array.from({ length: 1000 }, (_, i) => i)
+    .map((typeIndex) => resolvers.Query.eventByType(null, { type, typeIndex }, null))
+    .filter(Boolean);
 
   const total = allByType.length;
   const result = allByType.slice(offset, offset + limit);
-  res.json({ data: result, total, limit, offset });
-});
 
-// GET /events/search - Search events by multiple criteria
-app.get("/events/search", (req, res) => {
-  const { filter, errors } = parseFilterParams(req.query as Record<string, unknown>);
-  if (errors.length > 0) {
-    return res.status(400).json({ error: "Invalid search parameters", details: errors });
-  }
+  const nextCursor = offset + limit < total ? encodeCursor(offset + limit) : null;
+  const prevCursor = offset > 0 ? encodeCursor(Math.max(0, offset - limit)) : null;
 
-  const limitRaw = parseInt(req.query.limit as string);
-  const offsetRaw = parseInt(req.query.offset as string);
-  const limit = Math.min(limitRaw || 50, 1000);
-  const offset = offsetRaw || 0;
-
-  const allEvents = resolvers.Query.events(null, { limit: 10000, offset: 0, filter: null }, null);
-  const filtered = applyServerSideFilter(allEvents, filter);
-  const sorted = sortEvents(filtered, filter?.sort, filter?.order);
-  const total = sorted.length;
-  const page = sorted.slice(offset, offset + limit);
-
-  res.json({ data: page, total, limit, offset });
+  setPaginationHeaders(res, `/events/type/${type}`, total, limit, offset, nextCursor, prevCursor);
+  res.json({ data: result });
 });
 
 // GET /stats - Get statistics
-app.get("/stats", (req, res) => {
+v1.get("/stats", (_req, res) => {
   const result = resolvers.Query.statistics(null, {}, null);
   res.json({ data: result });
 });
 
-// GET /health - Health check
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: Math.floor(Date.now() / 1000) });
+// ── Export Endpoints (#273) ───────────────────────────────────────────────────
+
+// GET /export/events.json - JSON export
+v1.get("/export/events.json", (req, res) => {
+  const options: ExportOptions = {
+    format: "json",
+    limit: parseInt(req.query.limit as string) || undefined,
+    offset: parseInt(req.query.offset as string) || undefined,
+    fields: req.query.fields ? (req.query.fields as string).split(",") : undefined,
+  };
+
+  if (req.query.filter) {
+    options.filter = JSON.parse(req.query.filter as string);
+  }
+
+  const result = exportJson(options);
+  res.setHeader("Content-Disposition", `attachment; filename="${result.filename}"`);
+  res.setHeader("Content-Type", result.contentType);
+  res.json(JSON.parse(result.data));
+});
+
+// GET /export/events.csv - CSV export
+v1.get("/export/events.csv", (req, res) => {
+  const options: ExportOptions = {
+    format: "csv",
+    limit: parseInt(req.query.limit as string) || undefined,
+    offset: parseInt(req.query.offset as string) || undefined,
+    fields: req.query.fields ? (req.query.fields as string).split(",") : undefined,
+  };
+
+  if (req.query.filter) {
+    options.filter = JSON.parse(req.query.filter as string);
+  }
+
+  const result = exportCsv(options);
+  res.setHeader("Content-Disposition", `attachment; filename="${result.filename}"`);
+  res.setHeader("Content-Type", result.contentType);
+  res.send(result.data);
+});
+
+// GET /export/events/stream - Streaming JSON export (#273 streaming)
+v1.get("/export/events/stream", async (req, res) => {
+  const options: ExportOptions = {
+    format: "json",
+    limit: parseInt(req.query.limit as string) || undefined,
+    offset: parseInt(req.query.offset as string) || undefined,
+    fields: req.query.fields ? (req.query.fields as string).split(",") : undefined,
+    stream: true,
+  };
+
+  if (req.query.filter) {
+    options.filter = JSON.parse(req.query.filter as string);
+  }
+
+  const exporter = createStreamingExporter(options);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Transfer-Encoding", "chunked");
+  res.setHeader("X-Export-Status", "running");
+
+  try {
+    for await (const chunk of exporter.generate()) {
+      res.write(chunk);
+    }
+    res.setHeader("X-Export-Status", "completed");
+    res.end();
+  } catch (err) {
+    res.setHeader("X-Export-Status", "failed");
+    res.setHeader("X-Export-Error", err instanceof Error ? err.message : String(err));
+    res.end();
+  }
+});
+
+// GET /export/progress - Export progress check (#273 progress)
+v1.get("/export/progress", (_req, res) => {
+  res.json({
+    status: "idle",
+    message: "Use export endpoints to start an export. Progress is tracked via X-Export-Status header for streaming exports.",
+  });
+});
+
+app.use("/v1", v1);
+
+// Legacy unversioned routes (redirect to v1)
+app.get("/events", (req, res) => {
+  res.redirect(301, `/v1/events${req.url.includes("?") ? "?" + req.url.split("?")[1] : ""}`);
+});
+app.get("/events/:index", (req, res) => {
+  res.redirect(301, `/v1/events/${req.params.index}`);
+});
+app.get("/events/type/:type", (req, res) => {
+  res.redirect(301, `/v1/events/type/${req.params.type}${req.url.includes("?") ? "?" + req.url.split("?")[1] : ""}`);
+});
+app.get("/stats", (_req, res) => {
+  res.redirect(301, "/v1/stats");
 });
 
 app.listen(port, () => {
   console.log(`REST API listening on port ${port}`);
+  console.log(`  Versioned: /v1/*`);
+  console.log(`  Legacy:    /events, /stats (301 → /v1/...)`);
+  console.log(`  Health:    /healthz, /readyz, /metrics`);
+  console.log(`  Export:    /v1/export/events.{json,csv}, /v1/export/events/stream`);
 });
