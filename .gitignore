@@ -63,6 +63,10 @@ tarpaulin-report.html
 .vitest-cache/
 vitest.config.*.timestamp*
 
+# Hardhat build outputs
+bridge/cache/
+bridge/artifacts/
+
 # Soroban / Stellar
 .soroban/
 soroban-cli-log*
