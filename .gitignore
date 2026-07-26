@@ -49,10 +49,15 @@ ui/out/
 
 # Test artifacts & snapshots
 test_snapshots/
+__snapshots__/
 *.snap
 coverage/
 lcov.info
 tarpaulin-report.html
+
+# Hardhat build outputs
+bridge/cache/
+bridge/artifacts/
 
 # Soroban / Stellar
 .soroban/
