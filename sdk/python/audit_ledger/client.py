@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
+import io
+import json
 import struct
 import time
-from typing import Any, Generator, Optional
+from collections import OrderedDict
+from typing import Any, Callable, Generator, Optional
 
 from .models import Event, ContractError, RPCError, Page
 
@@ -44,6 +48,9 @@ class AuditLedgerClient:
         rpc_url: str = "https://soroban-testnet.stellar.org",
         network_passphrase: str = "Test SDF Network ; September 2015",
         source_keypair: Optional[str] = None,
+        cache_size: int = 128,
+        enable_cache: bool = True,
+        max_page_size: int = 100,
     ):
         if not STELLAR_SDK_AVAILABLE:
             raise ImportError(
@@ -54,6 +61,13 @@ class AuditLedgerClient:
         self.network_passphrase = network_passphrase
         self.server = SorobanServer(rpc_url)
         self.source = Keypair.from_secret(source_keypair) if source_keypair else None
+        self._event_cache: OrderedDict[int, Event] = OrderedDict()
+        self._total_events_cache: Optional[int] = None
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._cache_enabled = enable_cache
+        self._max_cache_size = max(1, cache_size)
+        self._max_page_size = max(1, max_page_size)
 
     def _invoke(self, method: str, params: dict = None):
         """Invoke a contract function and return the parsed result."""
@@ -82,6 +96,23 @@ class AuditLedgerClient:
             for v in result.values():
                 return int(v)
         return int(result)
+
+    def _ensure_runtime_state(self) -> None:
+        """Initialize runtime-only state for clients built without __init__."""
+        if not hasattr(self, "_event_cache"):
+            self._event_cache = OrderedDict()
+        if not hasattr(self, "_total_events_cache"):
+            self._total_events_cache = None
+        if not hasattr(self, "_cache_hits"):
+            self._cache_hits = 0
+        if not hasattr(self, "_cache_misses"):
+            self._cache_misses = 0
+        if not hasattr(self, "_cache_enabled"):
+            self._cache_enabled = True
+        if not hasattr(self, "_max_cache_size"):
+            self._max_cache_size = 128
+        if not hasattr(self, "_max_page_size"):
+            self._max_page_size = 100
 
     # ── Write functions ───────────────────────────────────────────────────
 
@@ -141,10 +172,16 @@ class AuditLedgerClient:
 
     # ── Read functions ────────────────────────────────────────────────────
 
-    def total_events(self) -> int:
+    def total_events(self, use_cache: bool = True) -> int:
         """Return the total number of events on-chain."""
+        self._ensure_runtime_state()
+        if use_cache and self._cache_enabled and self._total_events_cache is not None:
+            return self._total_events_cache
         result = self._invoke("total_events")
-        return self._parse_u32(result)
+        total = self._parse_u32(result)
+        if self._cache_enabled:
+            self._total_events_cache = total
+        return total
 
     def get_event(self, event_id: bytes) -> Event:
         """Retrieve an event by its 32-byte content-addressed ID."""
@@ -153,8 +190,22 @@ class AuditLedgerClient:
 
     def get_event_by_order(self, order: int) -> Event:
         """Retrieve an event by its sequential order index."""
+        self._ensure_runtime_state()
+        if self._cache_enabled and order in self._event_cache:
+            self._cache_hits += 1
+            self._event_cache.move_to_end(order)
+            return self._event_cache[order]
+
+        self._cache_misses += 1
         result = self._invoke("get_event_by_order", {"order": order})
-        return Event.from_dict(result) if isinstance(result, dict) else result
+        event = Event.from_dict(result) if isinstance(result, dict) else result
+        if self._cache_enabled:
+            self._event_cache[order] = event
+            self._event_cache.move_to_end(order)
+            self._total_events_cache = max(self._total_events_cache or 0, order + 1)
+            while len(self._event_cache) > self._max_cache_size:
+                self._event_cache.popitem(last=False)
+        return event
 
     def event_count(self, event_type: str) -> int:
         """Return the count of events for a specific type."""
@@ -169,7 +220,6 @@ class AuditLedgerClient:
         })
         return Event.from_dict(result) if isinstance(result, dict) else result
 
-<<<<<<< fix/127-stream-events
     def stream_events(
         self, after_index: int = 0, poll_interval_s: float = 5.0
     ) -> Generator[Event, None, None]:
@@ -182,31 +232,128 @@ class AuditLedgerClient:
         Yields:
             Event objects in ascending order as they appear.
         """
-        cursor = after_index
+        cursor = max(int(after_index), 0)
         while True:
             total = self.total_events()
             while cursor < total:
                 yield self.get_event_by_order(cursor)
                 cursor += 1
+            if poll_interval_s <= 0:
+                return
             time.sleep(poll_interval_s)
-=======
-    def get_events(self, offset: int = 0, limit: int = 50) -> "Page[Event]":
+
+    def get_events(
+        self,
+        offset: int = 0,
+        limit: int = 50,
+        cursor: Optional[int] = None,
+    ) -> "Page[Event]":
         """Return a paginated slice of all events.
 
         Args:
             offset: Zero-based index of the first event to return.
             limit: Maximum number of events to return.
+            cursor: An optional cursor that is treated as the starting offset.
 
         Returns:
             Page[Event] with items, total, offset, and limit fields.
         """
+        start = max(int(cursor or offset), 0) if cursor is not None else max(int(offset), 0)
+        self._ensure_runtime_state()
+        safe_limit = max(1, min(int(limit), self._max_page_size))
         total = self.total_events()
+        end = min(start + safe_limit, total)
         items: list[Event] = []
-        end = min(offset + limit, total)
-        for i in range(offset, end):
+        for i in range(start, end):
             items.append(self.get_event_by_order(i))
-        return Page(items=items, total=total, offset=offset, limit=limit)
->>>>>>> master
+        return Page(items=items, total=total, offset=start, limit=safe_limit)
+
+    def filter_events(
+        self,
+        events: list[Event],
+        event_type: Optional[str] = None,
+        submitter: Optional[str] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        metadata_query: Optional[str] = None,
+    ) -> list[Event]:
+        """Filter events on the client side using simple predicates."""
+        query = metadata_query.lower() if metadata_query else None
+        filtered: list[Event] = []
+        for event in events:
+            if event_type and event.event_type != event_type:
+                continue
+            if submitter and event.submitter != submitter:
+                continue
+            if start_time is not None and event.timestamp < start_time:
+                continue
+            if end_time is not None and event.timestamp > end_time:
+                continue
+            if query:
+                metadata_text = event.metadata.decode("utf-8", errors="ignore").lower()
+                if query not in metadata_text:
+                    continue
+            filtered.append(event)
+        return filtered
+
+    def export_events(
+        self,
+        events: list[Event],
+        fmt: str = "json",
+        streaming: bool = False,
+        on_progress: Optional[Callable[[dict[str, int]], None]] = None,
+    ) -> str:
+        """Export events as JSON or CSV, optionally emitting progress updates."""
+        total = len(events)
+        records: list[dict[str, Any]] = []
+        for index, event in enumerate(events, start=1):
+            records.append({
+                "index": event.index,
+                "timestamp": event.timestamp,
+                "event_type": event.event_type,
+                "submitter": event.submitter,
+                "metadata": event.metadata.decode("utf-8", errors="ignore"),
+                "metadata_hex": event.metadata.hex(),
+                "event_hash": event.event_hash.hex(),
+                "prev_hash": event.prev_hash.hex(),
+            })
+            if streaming and on_progress is not None:
+                on_progress({"completed": index, "total": total})
+
+        if fmt.lower() == "csv":
+            output = io.StringIO()
+            fieldnames = [
+                "index",
+                "timestamp",
+                "event_type",
+                "submitter",
+                "metadata",
+                "metadata_hex",
+                "event_hash",
+                "prev_hash",
+            ]
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(records)
+            return output.getvalue()
+
+        return json.dumps(records)
+
+    def cache_stats(self) -> dict[str, int]:
+        """Return cache hit/miss statistics and the current cache size."""
+        self._ensure_runtime_state()
+        return {
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "size": len(self._event_cache) + (1 if self._total_events_cache is not None else 0),
+        }
+
+    def invalidate_cache(self) -> None:
+        """Clear cached events and total event counts."""
+        self._event_cache.clear()
+        self._total_events_cache = None
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     # ── Governance ────────────────────────────────────────────────────────
 
