@@ -47,6 +47,12 @@ ui/out/
 *.js.map
 *.d.ts.map
 
+# SDK build outputs
+sdk/js/dist/
+sdk/python/dist/
+sdk/python/build/
+sdk/python/*.egg-info/
+
 # Test artifacts & snapshots
 test_snapshots/
 __snapshots__/
@@ -54,11 +60,8 @@ __snapshots__/
 coverage/
 lcov.info
 tarpaulin-report.html
-.coverage
-htmlcov/
-junit*.xml
-pytest-results.xml
-.pytest_cache/
+.vitest-cache/
+vitest.config.*.timestamp*
 
 # Soroban / Stellar
 .soroban/
