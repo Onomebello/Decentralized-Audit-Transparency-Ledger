@@ -1,5 +1,8 @@
 /**
- * AuditLedger Cross-Chain Relayer (#79)
+ * AuditLedger Cross-Chain Relayer
+ *
+ * Resolves merge conflicts between feat/issues-145-146-147-137 and master (#251).
+ * Merges health check (#145), proof cache (#142), and deduplication features cleanly.
  *
  * Monitors AuditLedger events on Stellar, generates inclusion proofs,
  * and submits them to the EVM Verifier contract.
@@ -35,6 +38,9 @@ interface EventProof {
   signature: string;     // 0x-prefixed 65-byte ECDSA hex
 }
 
+/**
+ * Health status for the /healthz endpoint (#145).
+ */
 interface HealthStatus {
   status: "ok" | "degraded";
   lastProcessedIndex: number;
@@ -51,9 +57,13 @@ const VERIFIER_ADDRESS = process.env.VERIFIER_ADDRESS ?? "";
 const RELAY_PRIVATE_KEY_HEX = process.env.RELAY_PRIVATE_KEY ?? "";
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL ?? "5000", 10);
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT ?? "8080", 10);
-const UNHEALTHY_POLL_THRESHOLD = 5; // Issue #145: unhealthy if no events in 5 poll cycles
+
+/** #145: Mark relayer degraded when no events seen for this many poll cycles. */
+const UNHEALTHY_POLL_THRESHOLD = 5;
+
+/** #142: Configurable proof LRU cache limits. */
 const PROOF_CACHE_MAX_SIZE = parseInt(process.env.PROOF_CACHE_MAX_SIZE ?? "1000", 10);
-const PROOF_CACHE_TTL_MS = parseInt(process.env.PROOF_CACHE_TTL_MS ?? "3600000", 10); // 1 hour default
+const PROOF_CACHE_TTL_MS = parseInt(process.env.PROOF_CACHE_TTL_MS ?? "3600000", 10); // 1 hour
 
 // Issue #255: event filter configuration (comma-separated lists, empty = allow all)
 const FILTER_EVENT_TYPES_INCLUDE = (process.env.FILTER_EVENT_TYPES_INCLUDE ?? "").split(",").filter(Boolean);
@@ -76,9 +86,14 @@ let relayerState = {
   pollsWithoutEvents: 0,
 };
 
+/**
+ * Returns the current health snapshot for the /healthz endpoint.
+ * Merged from feat/issues-145-146-147-137 (#251).
+ */
 function getHealthStatus(): HealthStatus {
   const uptime = Math.floor((Date.now() - relayerState.startTime) / 1000);
-  const status = relayerState.pollsWithoutEvents >= UNHEALTHY_POLL_THRESHOLD ? "degraded" : "ok";
+  const status =
+    relayerState.pollsWithoutEvents >= UNHEALTHY_POLL_THRESHOLD ? "degraded" : "ok";
   return {
     status,
     lastProcessedIndex: relayerState.lastProcessedIndex,
@@ -87,13 +102,17 @@ function getHealthStatus(): HealthStatus {
   };
 }
 
-// ── LRU Proof Cache (Issue #142) ──────────────────────────────────────────────
+// ── LRU Proof Cache (#142) ────────────────────────────────────────────────────
 
 interface CachedProof {
   proof: EventProof;
   timestamp: number;
 }
 
+/**
+ * LRU proof cache with TTL eviction.
+ * Merged and resolved from feat/issues-145-146-147-137 (#251).
+ */
 class ProofCache {
   private cache: Map<string, CachedProof> = new Map();
   private maxSize: number;
@@ -113,6 +132,7 @@ class ProofCache {
       return null;
     }
 
+    // LRU: promote to end
     this.cache.delete(eventHash);
     this.cache.set(eventHash, cached);
     return cached.proof;
@@ -125,9 +145,10 @@ class ProofCache {
 
     this.cache.set(eventHash, { proof, timestamp: Date.now() });
 
+    // Evict oldest entry when over capacity
     if (this.cache.size > this.maxSize) {
       const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
+      if (firstKey !== undefined) this.cache.delete(firstKey);
     }
   }
 
@@ -139,6 +160,44 @@ class ProofCache {
     return this.cache.size;
   }
 }
+
+// ── Event Deduplication (#251) ────────────────────────────────────────────────
+
+/**
+ * Tracks submitted event hashes to prevent duplicate EVM submissions.
+ * Resolves the dedup conflict between feat/issues-145-146-147-137 and master (#251).
+ *
+ * Uses a bounded Set; once MAX_DEDUP_SIZE is reached, the oldest half is cleared
+ * to avoid unbounded memory growth during long-running sessions.
+ */
+const MAX_DEDUP_SIZE = parseInt(process.env.MAX_DEDUP_SIZE ?? "10000", 10);
+const submittedEvents: Set<string> = new Set();
+
+/**
+ * Returns true if this event hash has already been submitted to the EVM chain,
+ * and registers it if not.
+ */
+function isDuplicate(eventHash: string): boolean {
+  if (submittedEvents.has(eventHash)) return true;
+
+  // Evict oldest half when the set grows too large
+  if (submittedEvents.size >= MAX_DEDUP_SIZE) {
+    const entries = Array.from(submittedEvents);
+    const half = Math.floor(entries.length / 2);
+    for (let i = 0; i < half; i++) {
+      submittedEvents.delete(entries[i]);
+    }
+    console.warn(`[relayer] dedup set trimmed from ${entries.length} to ${submittedEvents.size} entries`);
+  }
+
+  submittedEvents.add(eventHash);
+  return false;
+}
+
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+
+const stellarLimiter: TokenBucketRateLimiter = createStellarRateLimiter();
+const evmLimiter: TokenBucketRateLimiter = createEvmRateLimiter();
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
@@ -153,7 +212,10 @@ function jsonRpc(url: string, body: object): Promise<unknown> {
         port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
         path: parsed.pathname,
         method: "POST",
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+        },
       },
       (res) => {
         const chunks: Buffer[] = [];
@@ -173,8 +235,12 @@ function jsonRpc(url: string, body: object): Promise<unknown> {
   });
 }
 
-// ── Health check HTTP server ──────────────────────────────────────────────────
+// ── Health check HTTP server (#145) ───────────────────────────────────────────
 
+/**
+ * Starts the /healthz HTTP endpoint.
+ * Merged from feat/issues-145-146-147-137 — no duplicate function conflict (#251).
+ */
 function startHealthServer(): void {
   const server = http.createServer((req, res) => {
     if (req.url === "/healthz" && req.method === "GET") {
@@ -199,14 +265,20 @@ function buildProof(event: AuditEvent, relayKey: Buffer): EventProof {
   const ledgerSeqBuf = Buffer.alloc(8);
   ledgerSeqBuf.writeBigUInt64BE(BigInt(event.ledger_seq ?? 0));
 
-  const txHashBuf = Buffer.from((event.tx_hash ?? "0".repeat(64)).replace(/^0x/, ""), "hex");
+  const txHashBuf = Buffer.from(
+    (event.tx_hash ?? "0".repeat(64)).replace(/^0x/, ""),
+    "hex"
+  );
   const eventHashBuf = Buffer.from(event.event_hash.replace(/^0x/, ""), "hex");
 
   const preimage = Buffer.concat([ledgerSeqBuf, txHashBuf, eventHashBuf]);
 
   const signer = createSign("SHA256");
   signer.update(preimage);
-  const sig = signer.sign({ key: createPrivateKey({ key: relayKey, format: "der", type: "pkcs8" }), dsaEncoding: "ieee-p1363" });
+  const sig = signer.sign({
+    key: createPrivateKey({ key: relayKey, format: "der", type: "pkcs8" }),
+    dsaEncoding: "ieee-p1363",
+  });
 
   return {
     ledgerSeq: BigInt(event.ledger_seq ?? 0),
@@ -220,6 +292,8 @@ function buildProof(event: AuditEvent, relayKey: Buffer): EventProof {
 // ── EVM submission ────────────────────────────────────────────────────────────
 
 async function submitToEvm(proof: EventProof, eventData: Buffer): Promise<string> {
+  await evmLimiter.waitForToken();
+
   const proofHex = Buffer.concat([
     Buffer.alloc(8),
     Buffer.from(proof.txHash.slice(2), "hex"),
@@ -261,7 +335,13 @@ async function fetchLatestEvents(afterIndex: number): Promise<AuditEvent[]> {
     jsonrpc: "2.0",
     id: 1,
     method: "getEvents",
-    params: [{ contractIds: [CONTRACT_ID], filters: [{ type: "contract" }], pagination: { after: String(afterIndex) } }],
+    params: [
+      {
+        contractIds: [CONTRACT_ID],
+        filters: [{ type: "contract" }],
+        pagination: { after: String(afterIndex) },
+      },
+    ],
   })) as { result?: { events?: unknown[] } };
 
   if (!res.result?.events) return [];
@@ -287,9 +367,15 @@ const MAX_EVM_RETRIES = 3;
 
 async function run(): Promise<void> {
   relayerState.lastProcessedIndex = 0;
-  const relayKey = RELAY_PRIVATE_KEY_HEX ? Buffer.from(RELAY_PRIVATE_KEY_HEX, "hex") : Buffer.alloc(32);
+  const relayKey =
+    RELAY_PRIVATE_KEY_HEX
+      ? Buffer.from(RELAY_PRIVATE_KEY_HEX, "hex")
+      : Buffer.alloc(32);
   const proofCache = new ProofCache(PROOF_CACHE_MAX_SIZE, PROOF_CACHE_TTL_MS);
-  const transformer = new EventTransformer({ chainId: "evm-mainnet", sourceChain: "stellar" });
+  const transformer = new EventTransformer({
+    chainId: "evm-mainnet",
+    sourceChain: "stellar",
+  });
 
   // Issue #255: selective bridging via event type / submitter / time range filters
   const filterConfig: FilterConfig = {
@@ -319,7 +405,7 @@ async function run(): Promise<void> {
   console.log(`[relayer] proof cache: max ${PROOF_CACHE_MAX_SIZE} entries, TTL ${PROOF_CACHE_TTL_MS}ms`);
   console.log(`[relayer] batch config: max ${BATCH_MAX_SIZE} events, max wait ${BATCH_MAX_WAIT_MS}ms`);
 
-  // Start health check server (Issue #145)
+  // Start health check server (#145)
   startHealthServer();
 
   // Issue #257: start the bridge event verification API
@@ -393,15 +479,35 @@ async function run(): Promise<void> {
       }
 
       for (const event of events) {
-        console.log(`[relayer] processing event #${event.index} type=${event.event_type}`);
+        console.log(
+          `[relayer] processing event #${event.index} type=${event.event_type}`
+        );
+
+        // Deduplication check (#251) — skip events already submitted
+        if (isDuplicate(event.event_hash)) {
+          console.log(
+            `[relayer] duplicate event #${event.index} (hash ${event.event_hash}) — skipping`
+          );
+          relayerState.lastProcessedIndex = Math.max(
+            relayerState.lastProcessedIndex,
+            event.index + 1
+          );
+          continue;
+        }
 
         const txResult = transformer.transformEvent(event);
         if (!txResult.success) {
-          console.error(`[relayer] transformation failed for event #${event.index}:`, txResult.errors);
+          console.error(
+            `[relayer] transformation failed for event #${event.index}:`,
+            txResult.errors
+          );
           continue;
         }
         if (txResult.warnings.length > 0) {
-          console.warn(`[relayer] transformation warnings for event #${event.index}:`, txResult.warnings);
+          console.warn(
+            `[relayer] transformation warnings for event #${event.index}:`,
+            txResult.warnings
+          );
         }
 
         // Issue #256: collect into the current batch instead of submitting immediately
@@ -428,7 +534,10 @@ async function run(): Promise<void> {
 }
 
 if (require.main === module) {
-  run().catch((err) => { console.error(err); process.exit(1); });
+  run().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
 
 export {
