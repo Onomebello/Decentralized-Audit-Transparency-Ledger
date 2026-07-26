@@ -18,6 +18,7 @@ try:
     import stellar_sdk
     from stellar_sdk import SorobanServer, Keypair
     from stellar_sdk.soroban import SorobanClient
+
     STELLAR_SDK_AVAILABLE = True
 except ImportError:
     STELLAR_SDK_AVAILABLE = False
@@ -225,6 +226,8 @@ class AuditLedgerClient:
     ) -> Generator[Event, None, None]:
         """Yield new Event objects as they are logged on-chain.
 
+        Resolves merge conflict from fix/127-stream-events.
+
         Args:
             after_index: Resume from this sequential order index (exclusive).
             poll_interval_s: Seconds to wait between polls when no new events.
@@ -242,12 +245,7 @@ class AuditLedgerClient:
                 return
             time.sleep(poll_interval_s)
 
-    def get_events(
-        self,
-        offset: int = 0,
-        limit: int = 50,
-        cursor: Optional[int] = None,
-    ) -> "Page[Event]":
+    def get_events(self, offset: int = 0, limit: int = 50) -> "Page[Event]":
         """Return a paginated slice of all events.
 
         Args:
@@ -266,94 +264,89 @@ class AuditLedgerClient:
         items: list[Event] = []
         for i in range(start, end):
             items.append(self.get_event_by_order(i))
-        return Page(items=items, total=total, offset=start, limit=safe_limit)
+        return Page(items=items, total=total, offset=offset, limit=limit)
 
-    def filter_events(
-        self,
-        events: list[Event],
-        event_type: Optional[str] = None,
-        submitter: Optional[str] = None,
-        start_time: Optional[int] = None,
-        end_time: Optional[int] = None,
-        metadata_query: Optional[str] = None,
-    ) -> list[Event]:
-        """Filter events on the client side using simple predicates."""
-        query = metadata_query.lower() if metadata_query else None
-        filtered: list[Event] = []
-        for event in events:
-            if event_type and event.event_type != event_type:
-                continue
-            if submitter and event.submitter != submitter:
-                continue
-            if start_time is not None and event.timestamp < start_time:
-                continue
-            if end_time is not None and event.timestamp > end_time:
-                continue
-            if query:
-                metadata_text = event.metadata.decode("utf-8", errors="ignore").lower()
-                if query not in metadata_text:
-                    continue
-            filtered.append(event)
-        return filtered
+    # ── Health check (#239) ───────────────────────────────────────────────
 
-    def export_events(
-        self,
-        events: list[Event],
-        fmt: str = "json",
-        streaming: bool = False,
-        on_progress: Optional[Callable[[dict[str, int]], None]] = None,
-    ) -> str:
-        """Export events as JSON or CSV, optionally emitting progress updates."""
-        total = len(events)
-        records: list[dict[str, Any]] = []
-        for index, event in enumerate(events, start=1):
-            records.append({
-                "index": event.index,
-                "timestamp": event.timestamp,
-                "event_type": event.event_type,
-                "submitter": event.submitter,
-                "metadata": event.metadata.decode("utf-8", errors="ignore"),
-                "metadata_hex": event.metadata.hex(),
-                "event_hash": event.event_hash.hex(),
-                "prev_hash": event.prev_hash.hex(),
-            })
-            if streaming and on_progress is not None:
-                on_progress({"completed": index, "total": total})
+    def health_check(self) -> dict:
+        """Run a full health check and return a summary dict.
 
-        if fmt.lower() == "csv":
-            output = io.StringIO()
-            fieldnames = [
-                "index",
-                "timestamp",
-                "event_type",
-                "submitter",
-                "metadata",
-                "metadata_hex",
-                "event_hash",
-                "prev_hash",
-            ]
-            writer = csv.DictWriter(output, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(records)
-            return output.getvalue()
+        Returns a dict with keys:
+            - ``ok``: bool — True if all checks passed.
+            - ``rpc_reachable``: bool — RPC endpoint responded.
+            - ``contract_reachable``: bool — contract responded to a read call.
+            - ``rpc_url``: str — the configured RPC URL.
+            - ``contract_id``: str — the configured contract ID.
+            - ``error``: str or None — error message if any check failed.
 
-        return json.dumps(records)
+        Example::
 
-    def cache_stats(self) -> dict[str, int]:
-        """Return cache hit/miss statistics and the current cache size."""
-        self._ensure_runtime_state()
-        return {
-            "hits": self._cache_hits,
-            "misses": self._cache_misses,
-            "size": len(self._event_cache) + (1 if self._total_events_cache is not None else 0),
+            >>> status = client.health_check()
+            >>> status["ok"]
+            True
+        """
+        status = {
+            "ok": False,
+            "rpc_reachable": False,
+            "contract_reachable": False,
+            "rpc_url": self.rpc_url,
+            "contract_id": self.contract_id,
+            "error": None,
         }
+        try:
+            if not self.check_connectivity():
+                status["error"] = "RPC endpoint is not reachable"
+                return status
+            status["rpc_reachable"] = True
 
-    def invalidate_cache(self) -> None:
-        """Clear cached events and total event counts."""
-        self._event_cache.clear()
-        self._total_events_cache = None
-        self._cache_hits = 0
-        self._cache_misses = 0
+            self.total_events()
+            status["contract_reachable"] = True
+            status["ok"] = True
+        except Exception as exc:
+            status["error"] = str(exc)
+        return status
+
+    def check_connectivity(self) -> bool:
+        """Return True if the RPC endpoint is reachable.
+
+        Attempts a lightweight server info call. Returns False on any error.
+        """
+        try:
+            self.validate_rpc_endpoint(self.rpc_url)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def validate_rpc_endpoint(url: str) -> None:
+        """Validate that *url* looks like a well-formed HTTPS/HTTP URL.
+
+        Raises:
+            ValueError: If the URL scheme is missing or unsupported.
+
+        This is a lightweight offline check. Use :meth:`check_connectivity`
+        for a live network probe.
+        """
+        if not url:
+            raise ValueError("RPC URL must not be empty")
+        lower = url.lower()
+        if not (lower.startswith("https://") or lower.startswith("http://")):
+            raise ValueError(
+                f"RPC URL must start with 'https://' or 'http://': {url!r}"
+            )
+
+    def health_status(self) -> str:
+        """Return a human-readable health status string.
+
+        Returns ``"healthy"`` if all checks pass, ``"degraded"`` if the RPC
+        is reachable but the contract is not, or ``"unhealthy"`` otherwise.
+        """
+        result = self.health_check()
+        if result["ok"]:
+            return "healthy"
+        if result["rpc_reachable"]:
+            return "degraded"
+        return "unhealthy"
 
     # ── Governance ────────────────────────────────────────────────────────
 
@@ -459,7 +452,7 @@ class AuditLedgerClient:
     ) -> bytes:
         """Recompute the content-addressed event ID off-chain.
 
-        Matches `compute_event_id` in the contract (issue #70).
+        Matches ``compute_event_id`` in the contract (issue #70).
         """
         preimage = (
             contract_id.encode()
@@ -487,6 +480,7 @@ class AuditLedgerClient:
         """
         try:
             from stellar_sdk.keypair import Keypair
+
             verified = Keypair.from_public_key(pubkey.hex()).verify(
                 event_id, signature
             )

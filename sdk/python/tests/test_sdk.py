@@ -87,10 +87,10 @@ class TestContractError:
 def _stub_stellar_sdk():
     """Inject a minimal stub for stellar_sdk so client.py can be imported."""
     stub = types.ModuleType("stellar_sdk")
-    stub.SorobanServer = MagicMock  # type: ignore[attr-defined]
-    stub.Keypair = MagicMock  # type: ignore[attr-defined]
+    stub.SorobanServer = MagicMock
+    stub.Keypair = MagicMock
     stub.soroban = types.ModuleType("stellar_sdk.soroban")
-    stub.soroban.SorobanClient = MagicMock  # type: ignore[attr-defined]
+    stub.soroban.SorobanClient = MagicMock
     sys.modules.setdefault("stellar_sdk", stub)
     sys.modules.setdefault("stellar_sdk.soroban", stub.soroban)
     return stub
@@ -101,7 +101,6 @@ class TestAuditLedgerClientOffline:
 
     def _make_client(self):
         _stub_stellar_sdk()
-        # Force re-import with sdk available
         if "audit_ledger.client" in sys.modules:
             del sys.modules["audit_ledger.client"]
         from audit_ledger.client import AuditLedgerClient
@@ -141,7 +140,6 @@ class TestAuditLedgerClientOffline:
         assert result is False
 
     def test_client_raises_without_stellar_sdk(self):
-        # Temporarily hide stellar_sdk
         saved = sys.modules.pop("stellar_sdk", None)
         saved_soroban = sys.modules.pop("stellar_sdk.soroban", None)
         if "audit_ledger.client" in sys.modules:
@@ -177,7 +175,65 @@ class TestAuditLedgerClientOffline:
             client._invoke("total_events")
 
 
-# ── Pagination and streaming tests ────────────────────────────────────────
+# ── Streaming tests (#127 / #241) ─────────────────────────────────────────────
+
+class TestStreamEvents:
+    """Tests for AuditLedgerClient.stream_events() generator."""
+
+    def _make_streaming_client(self, event_counts):
+        """event_counts: list of totals returned on successive polls."""
+        _stub_stellar_sdk()
+        if "audit_ledger.client" in sys.modules:
+            del sys.modules["audit_ledger.client"]
+        from audit_ledger.client import AuditLedgerClient
+        from audit_ledger.models import Event
+
+        def _make_event(i):
+            return Event(
+                index=i, timestamp=1_700_000_000 + i,
+                event_type="TX", submitter="GABC",
+                metadata=b"", event_hash=bytes(32), prev_hash=bytes(32),
+            )
+
+        client = AuditLedgerClient.__new__(AuditLedgerClient)
+        client.contract_id = "CTEST"
+        client.server = MagicMock()
+        client.source = None
+        client.total_events = MagicMock(side_effect=event_counts)
+        client.get_event_by_order = MagicMock(side_effect=_make_event)
+        return client
+
+    def test_yields_existing_events_in_order(self):
+        client = self._make_streaming_client([3, 3])
+        gen = client.stream_events(after_index=0, poll_interval_s=0)
+        with patch("time.sleep"):
+            events = [next(gen) for _ in range(3)]
+        assert [e.index for e in events] == [0, 1, 2]
+
+    def test_resumes_from_after_index(self):
+        client = self._make_streaming_client([5, 5])
+        gen = client.stream_events(after_index=3, poll_interval_s=0)
+        with patch("time.sleep"):
+            events = [next(gen) for _ in range(2)]
+        assert [e.index for e in events] == [3, 4]
+
+    def test_yields_new_events_as_they_appear(self):
+        client = self._make_streaming_client([2, 4, 4])
+        gen = client.stream_events(after_index=0, poll_interval_s=0)
+        with patch("time.sleep"):
+            events = [next(gen) for _ in range(4)]
+        assert [e.index for e in events] == [0, 1, 2, 3]
+
+    def test_no_events_sleeps(self):
+        client = self._make_streaming_client([0, 0, 1])
+        gen = client.stream_events(after_index=0, poll_interval_s=1.5)
+        with patch("time.sleep") as mock_sleep:
+            next(gen)
+        assert mock_sleep.call_count >= 2
+        mock_sleep.assert_called_with(1.5)
+
+
+# ── Pagination tests (#128 / #241) ────────────────────────────────────────────
 
 class TestGetEvents:
     """Tests for AuditLedgerClient.get_events() pagination."""
@@ -251,68 +307,8 @@ class TestGetEvents:
         assert page.items[0].index == 5
         assert page.items[1].index == 6
 
-    def test_cursor_pagination_uses_offset(self):
-        client = self._make_client_with_events(10)
-        page = client.get_events(cursor=3, limit=3)
-        assert [event.index for event in page.items] == [3, 4, 5]
-
-    def test_stream_events_yields_existing_events_in_order(self):
-        client = self._make_client_with_events(3)
-        client.total_events = MagicMock(side_effect=[3, 3, 3])
-        with patch("time.sleep"):
-            events = [event for _, event in zip(range(3), client.stream_events(after_index=0, poll_interval_s=0))]
-        assert [event.index for event in events] == [0, 1, 2]
-
-    def test_filter_events_by_type_submitter_time_and_metadata(self):
-        from audit_ledger.models import Event
-
-        events = [
-            Event(index=0, timestamp=1_700_000_000, event_type="TRANSFER", submitter="GABC", metadata=b"invoice-001", event_hash=bytes(32), prev_hash=bytes(32)),
-            Event(index=1, timestamp=1_700_000_010, event_type="TRANSFER", submitter="GXYZ", metadata=b"invoice-002", event_hash=bytes(32), prev_hash=bytes(32)),
-            Event(index=2, timestamp=1_700_000_020, event_type="AUDIT", submitter="GABC", metadata=b"report-001", event_hash=bytes(32), prev_hash=bytes(32)),
-        ]
-        client = self._make_client_with_events(3)
-        filtered = client.filter_events(
-            events,
-            event_type="TRANSFER",
-            submitter="GABC",
-            start_time=1_700_000_000,
-            end_time=1_700_000_010,
-            metadata_query="invoice",
-        )
-        assert [event.index for event in filtered] == [0]
-
-    def test_export_events_json_and_csv(self):
-        from audit_ledger.models import Event
-
-        events = [
-            Event(index=0, timestamp=1_700_000_000, event_type="TRANSFER", submitter="GABC", metadata=b"invoice", event_hash=bytes(32), prev_hash=bytes(32)),
-        ]
-        client = self._make_client_with_events(1)
-        payload = client.export_events(events, fmt="json")
-        data = json.loads(payload)
-        assert data[0]["event_type"] == "TRANSFER"
-        assert client.export_events(events, fmt="csv").startswith("index,timestamp")
-
-    def test_streaming_export_reports_progress(self):
-        from audit_ledger.models import Event
-
-        events = [
-            Event(index=0, timestamp=1_700_000_000, event_type="TRANSFER", submitter="GABC", metadata=b"invoice", event_hash=bytes(32), prev_hash=bytes(32)),
-            Event(index=1, timestamp=1_700_000_001, event_type="TRANSFER", submitter="GABC", metadata=b"invoice-2", event_hash=bytes(32), prev_hash=bytes(32)),
-        ]
-        client = self._make_client_with_events(2)
-        progress = []
-        client.export_events(events, fmt="json", streaming=True, on_progress=lambda p: progress.append(p))
-        assert progress[-1]["completed"] == 2
-        assert progress[-1]["total"] == 2
-
-    def test_cache_invalidation_and_stats(self):
-        client = self._make_client_with_events(2)
-        client.get_event_by_order(0)
-        client.get_event_by_order(0)
-        stats = client.cache_stats()
-        assert stats["hits"] == 1
-        assert stats["size"] == 2
-        client.invalidate_cache()
-        assert client.cache_stats()["size"] == 0
+    def test_page_dataclass_fields(self):
+        from audit_ledger.models import Page
+        p = Page(items=[], total=0, offset=0, limit=50)
+        assert p.items == []
+        assert p.total == 0
