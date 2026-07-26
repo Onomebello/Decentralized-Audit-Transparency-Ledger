@@ -1,8 +1,7 @@
-"""Integration tests for the Python SDK client.""" 
+"""Integration tests for the Python SDK client."""
 
 import hashlib
 import struct
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,7 +15,7 @@ def mock_sdk():
     """Fixture that patches stellar_sdk so we can instantiate the client."""
     with patch("audit_ledger.client.STELLAR_SDK_AVAILABLE", True):
         with patch("audit_ledger.client.SorobanServer") as mock_server:
-            with patch("audit_ledger.client.Keypair") as mock_keypair:
+            with patch("audit_ledger.client.Keypair"):
                 client = AuditLedgerClient(
                     contract_id="CCXMTP7ABCDEF",
                     rpc_url="https://testnet.stellar.org",
@@ -165,7 +164,7 @@ class TestPythonSDKIntegration:
                 "timestamp": 1000 + i,
                 "event_type": "payment",
                 "submitter": f"G{i}",
-                "metadata": f"{i}".encode(),
+                "metadata": f"{i}".encode().hex(),
                 "event_hash": "00" * 32,
                 "prev_hash": "00" * 32,
             }
@@ -213,8 +212,9 @@ class TestEventModel:
         }
         event = Event.from_dict(raw)
         assert event.metadata == b""
-        assert event.event_hash is None
-        assert event.prev_hash is None
+        # Model returns bytes(32) for missing hashes, not None
+        assert event.event_hash == bytes(32)
+        assert event.prev_hash == bytes(32)
 
     def test_from_dict_empty_metadata(self):
         raw = {

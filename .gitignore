@@ -63,6 +63,12 @@ ui/out/
 *.d.ts.map
 *.tsbuildinfo
 
+# SDK build outputs
+sdk/js/dist/
+sdk/python/dist/
+sdk/python/build/
+sdk/python/*.egg-info/
+
 # Test artifacts & snapshots
 test_snapshots/
 __snapshots__/
@@ -71,10 +77,12 @@ coverage/
 lcov.info
 lcov-report/
 tarpaulin-report.html
-.nyc_output/
-junit.xml
-test-results/
-*.test-results.json
+.vitest-cache/
+vitest.config.*.timestamp*
+
+# Hardhat build outputs
+bridge/cache/
+bridge/artifacts/
 
 # Soroban / Stellar
 .soroban/

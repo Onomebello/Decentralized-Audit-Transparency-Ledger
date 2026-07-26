@@ -12,7 +12,10 @@ import https from "https";
 import http from "http";
 import { createHash, createSign, createPrivateKey } from "crypto";
 import { EventTransformer, StellarEvent, transformForEvm } from "./transform";
-import { TokenBucketRateLimiter, createStellarRateLimiter, createEvmRateLimiter } from "./rate-limiter";
+import { EventFilter, FilterConfig } from "./filter";
+import { BatchProcessor, BatchProofEntry } from "./batch";
+import { VerificationStore, Verifier as OnChainVerifier, startVerificationServer } from "./verification";
+import { ErrorRecoveryManager, consoleNotifier } from "./recovery";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,7 +65,20 @@ const UNHEALTHY_POLL_THRESHOLD = 5;
 const PROOF_CACHE_MAX_SIZE = parseInt(process.env.PROOF_CACHE_MAX_SIZE ?? "1000", 10);
 const PROOF_CACHE_TTL_MS = parseInt(process.env.PROOF_CACHE_TTL_MS ?? "3600000", 10); // 1 hour
 
-// ── Health tracking state (#145) ──────────────────────────────────────────────
+// Issue #255: event filter configuration (comma-separated lists, empty = allow all)
+const FILTER_EVENT_TYPES_INCLUDE = (process.env.FILTER_EVENT_TYPES_INCLUDE ?? "").split(",").filter(Boolean);
+const FILTER_SUBMITTERS_INCLUDE = (process.env.FILTER_SUBMITTERS_INCLUDE ?? "").split(",").filter(Boolean);
+const FILTER_FROM_TIMESTAMP = process.env.FILTER_FROM_TIMESTAMP ? parseInt(process.env.FILTER_FROM_TIMESTAMP, 10) : undefined;
+const FILTER_TO_TIMESTAMP = process.env.FILTER_TO_TIMESTAMP ? parseInt(process.env.FILTER_TO_TIMESTAMP, 10) : undefined;
+
+// Issue #256: batch processing configuration
+const BATCH_MAX_SIZE = parseInt(process.env.BATCH_MAX_SIZE ?? "25", 10);
+const BATCH_MAX_WAIT_MS = parseInt(process.env.BATCH_MAX_WAIT_MS ?? "10000", 10);
+
+// Issue #257: verification API configuration
+const VERIFICATION_PORT = parseInt(process.env.VERIFICATION_PORT ?? "8081", 10);
+
+// ── Health tracking state ─────────────────────────────────────────────────────
 
 let relayerState = {
   startTime: Date.now(),
@@ -297,6 +313,21 @@ async function submitToEvm(proof: EventProof, eventData: Buffer): Promise<string
   return res.result ?? "0x";
 }
 
+// Issue #257: read-only check against the Verifier contract's verified-events mapping
+const verifyOnEvm: OnChainVerifier = async (eventHash: string): Promise<boolean> => {
+  const hashHex = eventHash.replace(/^0x/, "").padStart(64, "0");
+  const callData = "0x" + "9e5faafc" + hashHex; // isVerified(bytes32) selector placeholder
+
+  const res = (await jsonRpc(EVM_RPC, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "eth_call",
+    params: [{ to: VERIFIER_ADDRESS, data: callData }, "latest"],
+  })) as { result?: string };
+
+  return res.result === "0x" + "0".repeat(63) + "1";
+};
+
 // ── Stellar polling ───────────────────────────────────────────────────────────
 
 async function fetchLatestEvents(afterIndex: number): Promise<AuditEvent[]> {
@@ -346,25 +377,105 @@ async function run(): Promise<void> {
     sourceChain: "stellar",
   });
 
+  // Issue #255: selective bridging via event type / submitter / time range filters
+  const filterConfig: FilterConfig = {
+    eventType: FILTER_EVENT_TYPES_INCLUDE.length > 0 ? { include: FILTER_EVENT_TYPES_INCLUDE } : undefined,
+    submitter: FILTER_SUBMITTERS_INCLUDE.length > 0 ? { include: FILTER_SUBMITTERS_INCLUDE } : undefined,
+    timeRange:
+      FILTER_FROM_TIMESTAMP !== undefined || FILTER_TO_TIMESTAMP !== undefined
+        ? { fromTimestamp: FILTER_FROM_TIMESTAMP, toTimestamp: FILTER_TO_TIMESTAMP }
+        : undefined,
+  };
+  const eventFilter = new EventFilter(filterConfig);
+
+  // Issue #256: batch collection, proof generation, submission, and stats
+  const batchProcessor = new BatchProcessor({ maxBatchSize: BATCH_MAX_SIZE, maxWaitMs: BATCH_MAX_WAIT_MS });
+
+  // Issue #257: verification API backing store
+  const verificationStore = new VerificationStore();
+
+  // Issue #258: error classification, retry/backoff, dead letter queue, notifications
+  const errorRecoveryManager = new ErrorRecoveryManager<AuditEvent>({
+    strategies: { contract: { maxRetries: MAX_EVM_RETRIES, backoffMs: () => 2_000 } },
+  });
+  errorRecoveryManager.notifications.subscribe(consoleNotifier);
+
   console.log(`[relayer] starting — Stellar RPC: ${STELLAR_RPC}`);
   console.log(`[relayer] EVM target: ${VERIFIER_ADDRESS} @ ${EVM_RPC}`);
-  console.log(
-    `[relayer] proof cache: max ${PROOF_CACHE_MAX_SIZE} entries, TTL ${PROOF_CACHE_TTL_MS}ms`
-  );
-  console.log(`[relayer] dedup set: max ${MAX_DEDUP_SIZE} entries`);
+  console.log(`[relayer] proof cache: max ${PROOF_CACHE_MAX_SIZE} entries, TTL ${PROOF_CACHE_TTL_MS}ms`);
+  console.log(`[relayer] batch config: max ${BATCH_MAX_SIZE} events, max wait ${BATCH_MAX_WAIT_MS}ms`);
 
   // Start health check server (#145)
   startHealthServer();
 
+  // Issue #257: start the bridge event verification API
+  startVerificationServer(VERIFICATION_PORT, verificationStore, verifyOnEvm);
+
+  const buildProofCached = (evt: AuditEvent) => {
+    let proof = proofCache.get(evt.event_hash);
+    if (proof) {
+      console.log(`[relayer] proof cache hit for event #${evt.index}`);
+    } else {
+      console.log(`[relayer] proof cache miss for event #${evt.index}, building proof`);
+      proof = buildProof(evt, relayKey);
+      proofCache.set(evt.event_hash, proof);
+    }
+    return proof;
+  };
+
+  const submitBatchEntry = async (entry: BatchProofEntry): Promise<string> => {
+    const event = entry.event as AuditEvent;
+
+    // Issue #259: Transform event for cross-chain compatibility
+    const txResult = transformer.transformEvent(event);
+    if (!txResult.success) {
+      throw new Error(`transformation failed: ${txResult.errors.join(", ")}`);
+    }
+
+    const evmEvent = txResult.data!;
+    const eventData = Buffer.from(JSON.stringify({
+      index: evmEvent.index,
+      eventType: evmEvent.eventType,
+      category: evmEvent.category,
+      submitter: evmEvent.submitter,
+      metadata: evmEvent.metadata,
+      chainId: evmEvent.chainId,
+      sourceChain: evmEvent.sourceChain,
+    }));
+
+    try {
+      const result = await submitToEvm(entry.proof!, eventData);
+      console.log(`[relayer] submitted proof for event #${event.index} → EVM result: ${result}`);
+      errorRecoveryManager.resolved(event.event_hash);
+      // Issue #257: record the submission against the verification API
+      await verificationStore.submit(event.event_hash, entry.proof!, verifyOnEvm);
+      return result;
+    } catch (err) {
+      const decision = errorRecoveryManager.handle(event.event_hash, event, err);
+      if (decision.shouldRetry) {
+        console.warn(`[relayer] event #${event.index} failed, retrying (attempt ${decision.attempt}, delay ${decision.delayMs}ms)`);
+      } else {
+        console.error(`[relayer] event #${event.index} exhausted retries, moved to dead letter queue`);
+      }
+      throw err;
+    }
+  };
+
   while (true) {
     try {
       await stellarLimiter.waitForToken();
-      const events = await fetchLatestEvents(relayerState.lastProcessedIndex);
+      const rawEvents = await fetchLatestEvents(relayerState.lastProcessedIndex);
 
-      if (events.length === 0) {
+      if (rawEvents.length === 0) {
         relayerState.pollsWithoutEvents++;
       } else {
         relayerState.pollsWithoutEvents = 0;
+      }
+
+      // Issue #255: apply event filters before any further processing
+      const { passed: events, rejected } = eventFilter.apply(rawEvents);
+      if (rejected.length > 0) {
+        console.log(`[relayer] filtered out ${rejected.length} event(s): ${rejected.map((r) => r.reason).join("; ")}`);
       }
 
       for (const event of events) {
@@ -384,7 +495,6 @@ async function run(): Promise<void> {
           continue;
         }
 
-        // Transform event for cross-chain compatibility
         const txResult = transformer.transformEvent(event);
         if (!txResult.success) {
           console.error(
@@ -400,64 +510,20 @@ async function run(): Promise<void> {
           );
         }
 
-        // Proof cache check (#142) — reuse proof if already built
-        let proof = proofCache.get(event.event_hash);
-        if (proof) {
-          console.log(`[relayer] proof cache hit for event #${event.index}`);
-        } else {
-          console.log(
-            `[relayer] proof cache miss for event #${event.index}, building proof`
-          );
-          proof = buildProof(event, relayKey);
-          proofCache.set(event.event_hash, proof);
-        }
+        // Issue #256: collect into the current batch instead of submitting immediately
+        batchProcessor.collect(event);
+        relayerState.lastProcessedIndex = Math.max(relayerState.lastProcessedIndex, event.index + 1);
+      }
 
-        const evmEvent = txResult.data!;
-        const eventData = Buffer.from(
-          JSON.stringify({
-            index: evmEvent.index,
-            eventType: evmEvent.eventType,
-            category: evmEvent.category,
-            submitter: evmEvent.submitter,
-            metadata: evmEvent.metadata,
-            chainId: evmEvent.chainId,
-            sourceChain: evmEvent.sourceChain,
-          })
+      if (batchProcessor.isReady()) {
+        const batchResult = await batchProcessor.processBatch(buildProofCached, submitBatchEntry);
+        console.log(
+          `[relayer] batch #${batchResult.batchId} complete — submitted=${batchResult.submitted} failed=${batchResult.failed}`
         );
-
-        let lastError: unknown;
-        let submitted = false;
-        for (let attempt = 1; attempt <= MAX_EVM_RETRIES; attempt++) {
-          try {
-            const result = await submitToEvm(proof, eventData);
-            console.log(
-              `[relayer] submitted proof for event #${event.index} → EVM result: ${result}`
-            );
-            submitted = true;
-            break;
-          } catch (err) {
-            lastError = err;
-            console.warn(
-              `[relayer] EVM submission attempt ${attempt}/${MAX_EVM_RETRIES} failed for event #${event.index}:`,
-              err
-            );
-            if (attempt < MAX_EVM_RETRIES) {
-              await new Promise((r) => setTimeout(r, 500 * attempt));
-            }
-          }
+        console.log(`[relayer] batch stats: ${JSON.stringify(batchProcessor.getStatistics())}`);
+        if (errorRecoveryManager.deadLetterQueue.size() > 0) {
+          console.warn(`[relayer] dead letter queue size: ${errorRecoveryManager.deadLetterQueue.size()}`);
         }
-
-        if (!submitted) {
-          console.error(
-            `[relayer] failed to submit event #${event.index} after ${MAX_EVM_RETRIES} attempts:`,
-            lastError
-          );
-        }
-
-        relayerState.lastProcessedIndex = Math.max(
-          relayerState.lastProcessedIndex,
-          event.index + 1
-        );
       }
     } catch (err) {
       console.error("[relayer] poll error:", err);
@@ -477,11 +543,10 @@ if (require.main === module) {
 export {
   buildProof,
   fetchLatestEvents,
-  getHealthStatus,
-  isDuplicate,
   EventProof,
   AuditEvent,
   HealthStatus,
   ProofCache,
   EventTransformer,
+  verifyOnEvm,
 };
